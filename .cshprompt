@@ -1,0 +1,61 @@
+#!/bin/tcsh
+
+set    gray="%{\033[1;30m%}"
+set     red="%{\033[1;31m%}"
+set   green="%{\033[1;32m%}"
+set  yellow="%{\033[1;33m%}"
+set    blue="%{\033[1;34m%}"
+set magenta="%{\033[1;35m%}"
+set    cyan="%{\033[1;36m%}"
+set   white="%{\033[1;37m%}"
+set     end="%{\033[0m%}" # This is needed at the end.
+
+set GIT_BRANCH=`sh -c 'git branch --no-color 2> /dev/null' | sed -e '/^[^*]/d' -e 's/* \(.*\)/\1/'`
+if ("$GIT_BRANCH" != "") then
+    set GIT_BRANCH="${GIT_BRANCH}"
+endif
+
+set GIT_UNSTAGED=`sh -c 'git diff --numstat 2> /dev/null' | wc -l`
+if ("$GIT_UNSTAGED" == "0") then
+    set GIT_UNSTAGED=""
+else
+    set GIT_UNSTAGED="+${GIT_UNSTAGED}"
+endif
+
+set GIT_STAGED=`sh -c 'git diff --cached --numstat 2> /dev/null' | wc -l`
+if ("$GIT_STAGED" == "0") then
+    set GIT_STAGED=""
+else
+    set GIT_STAGED="+${GIT_STAGED}"
+endif
+
+if ("$GIT_UNSTAGED" != "" || "$GIT_STAGED" != "" || "$GIT_BRANCH" != "") then
+    set GIT_STATUS="${cyan}[${GIT_BRANCH}${red}${GIT_UNSTAGED}${green}${GIT_STAGED}${cyan}]"
+else
+    set GIT_STATUS=""
+endif
+
+set SVN_REV=`sh -c 'svn info 2> /dev/null' | awk '/Revision/' | sed -e 's/Revision: \([0-9]\+\)/\1/'`
+if ("$SVN_REV" != "") then
+    set SVN_REV="${cyan}r${SVN_REV}${cyan}"
+endif
+
+set SVN_CHANGED=`sh -c 'svn st 2> /dev/null' | wc -l`
+if ("$SVN_CHANGED" == "0") then
+    set SVN_CHANGED=""
+else
+    set SVN_CHANGED="+${SVN_CHANGED}"
+endif
+
+if ("$SVN_REV" != "" || "$SVN_CHANGED" != "") then
+    set SVN_STATUS="${cyan}[${SVN_REV}${red}${SVN_CHANGED}${cyan}]"
+else
+    set SVN_STATUS=""
+endif
+
+set SRC_CTRL="${GIT_STATUS}${SVN_STATUS}"
+
+set prompt="${gray}%n:${magenta}%c${SRC_CTRL}${gray}>>${end} "
+
+unset red green yellow blue magenta cyan yellow white end
+
