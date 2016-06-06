@@ -11,9 +11,6 @@ set   white="%{\033[1;37m%}"
 set     end="%{\033[0m%}" # This is needed at the end.
 
 set GIT_BRANCH=`sh -c 'git branch --no-color 2> /dev/null' | sed -e '/^[^*]/d' -e 's/* \(.*\)/\1/'`
-if ("$GIT_BRANCH" != "") then
-    set GIT_BRANCH="${GIT_BRANCH}"
-endif
 
 set GIT_UNSTAGED=`sh -c 'git diff --numstat 2> /dev/null' | wc -l`
 if ("$GIT_UNSTAGED" == "0") then
