@@ -1,0 +1,151 @@
+#!/bin/bash
+#-------------------------------------------------------------------------------
+# File        : .prompt
+# Author      : Lewis Russell
+# Description : Very useful csh/tcsh/bash prompt for seamless use with Git and
+#               SVN.
+#-------------------------------------------------------------------------------
+
+#-------------------------------------------------------------------------------
+# Arguments
+#-------------------------------------------------------------------------------
+SHELL=$1
+RET_CODE=$2
+
+#-------------------------------------------------------------------------------
+# Attributes & Colours
+#-------------------------------------------------------------------------------
+
+if [ "$SHELL" == "bash" ]; then
+    c_start="\["
+      c_end="\]"
+       user="\u"
+        dir="\W"
+else # csh/tcsh
+    c_start="%{"
+      c_end="%}"
+       user="%n"
+        dir="%c"
+fi
+
+   gray="${c_start}\e[1;30m${c_end}"
+    red="${c_start}\e[1;31m${c_end}"
+  green="${c_start}\e[1;32m${c_end}"
+ yellow="${c_start}\e[1;33m${c_end}"
+   blue="${c_start}\e[1;34m${c_end}"
+magenta="${c_start}\e[1;35m${c_end}"
+   cyan="${c_start}\e[1;36m${c_end}"
+  white="${c_start}\e[1;37m${c_end}"
+    end="${c_start}\e[0m${c_end}" # This is needed at the end.
+
+if [ "$SHELL" == "bash" ]; then
+    dir_colour=$yellow
+else
+    dir_colour=$magenta
+fi
+
+src_ctl_colour="$gray"
+
+#-------------------------------------------------------------------------------
+# Return Code
+#-------------------------------------------------------------------------------
+if [ "$RET_CODE" == 0 ]; then
+    ret_colour=$cyan
+else
+    ret_colour=$red
+fi
+
+in_git=`git rev-parse 2>&1`
+
+#-------------------------------------------------------------------------------
+# Source Control
+#-------------------------------------------------------------------------------
+if [ "$in_git" == "" ]; then
+    #-----------------------------------------------------------------------
+    # Git
+    #-----------------------------------------------------------------------
+    has_src_ctrl=1
+    info=`timeout 2 git status -sbu 2> /dev/null`
+    ahead=`echo "$info" | grep 'ahead'  | sed -e 's/.*ahead\s\+\([0-9]\+\).*/+\1/g'`
+    behind=`echo "$info" | grep 'behind' | sed -e 's/.*behind\s\+\([0-9]\+\).*/-\1/g'`
+    files="$info"
+    checkout=`echo "$info" | sed -e 's/##\s\+\([[:alnum:]_\/]\+\).*/\1/g' | head -n1`
+else
+    #-----------------------------------------------------------------------
+    # SVN
+    #-----------------------------------------------------------------------
+    info=`timeout 2 svn info 2> /dev/null`
+    rev=`echo "$info" | grep 'Revision' | sed 's/Revision: \([0-9]\+\)/\1/'`
+
+    if [ "$rev" != "" ]; then
+        has_src_ctrl=1
+        repo=`echo "$info" | grep 'Repository Root' | sed 's/Repository Root: \(.\+\)/\1/'`
+        repo_rev=`timeout 2 svn info $repo 2> /dev/null | grep 'Revision' | sed 's/Revision: \([0-9]\+\)/\1/'`
+        ahead=""
+        behind=`expr $repo_rev - $rev`
+
+        if [ "$behind" == "0" ]; then
+             behind=""
+        else
+             behind="-$behind"
+        fi
+
+        files=`timeout 2 svn status 2> /dev/null`
+        checkout="r$rev"
+    fi
+fi
+
+#---------------------------------------------------------------------------
+# Status
+#---------------------------------------------------------------------------
+src_ctrl=""
+if [ "$has_src_ctrl" == "1" ]; then
+    staged=`echo "$files" | grep '^\s*A' | wc -l`
+    if [ "$staged" == "0" ]; then
+         staged=""
+    else
+         staged="+$staged"
+    fi
+
+    unstaged=`echo "$files" | grep '^\s*M' | wc -l`
+    if [ "$unstaged" == "0" ]; then
+         unstaged=""
+    else
+         unstaged="+$unstaged"
+    fi
+
+    untracked=`echo "$files" | grep '^\s*?' | wc -l`
+    if [ "$untracked" == "0" ]; then
+         untracked=""
+    else
+         untracked="+$untracked"
+    fi
+
+    src_ctrl+="$src_ctl_colour"
+    src_ctrl+="["
+    src_ctrl+="$checkout"
+    src_ctrl+="$white"
+    src_ctrl+="$ahead"
+    src_ctrl+="$behind"
+    src_ctrl+="$green"
+    src_ctrl+="$staged"
+    src_ctrl+="$red"
+    src_ctrl+="$unstaged"
+    src_ctrl+="$magenta"
+    src_ctrl+="$untracked"
+    src_ctrl+="$src_ctl_colour"
+    src_ctrl+="]"
+fi
+
+#-------------------------------------------------------------------------------
+# Prompt
+#-------------------------------------------------------------------------------
+prompt="$ret_colour"
+prompt+="$user:"
+prompt+="$dir_colour"
+prompt+="$dir"
+prompt+="$src_ctrl"
+prompt+="$cyan>>$end "
+
+echo "$prompt"
+

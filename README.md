@@ -2,15 +2,23 @@ Features
 ========
 * Provides a nice colourful prompt.
 * Gives you basic information about your git or svn checkout.
+* Supports bash, csh and tcsh.
 
-Installation
-============
-1. Move `.cshprompt` to your home directory:
+Installation for Bash
+=====================
+. Add the following to your `.bashrc`:
 ```
-mv .cshprompt ~/
+export PROMPT_COMMAND=__prompt_command
+
+function __prompt_command() {
+    EXIT=$?
+    PS1=`~/.prompt bash ${EXIT}`
+}
 ```
 
-2. Add the following to your `.cshrc`:
+Installation for Csh/Tcsh
+=========================
+. Add the following to your `.cshrc`:
 ```
-alias precmd 'source ~/.cshprompt'
+alias precmd 'set prompt="`~/.prompt csh $?`"'
 ```
