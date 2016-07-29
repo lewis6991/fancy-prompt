@@ -6,8 +6,8 @@ Features
 
 Installation for Bash
 =====================
-. Add the following to your `.bashrc`:
-```
+Add the following to your `.bashrc`:
+```bash
 export PROMPT_COMMAND=__prompt_command
 
 function __prompt_command() {
@@ -18,7 +18,7 @@ function __prompt_command() {
 
 Installation for Csh/Tcsh
 =========================
-. Add the following to your `.cshrc`:
-```
+Add the following to your `.cshrc`:
+```csh
 alias precmd 'set prompt="`~/.prompt csh $?`"'
 ```
