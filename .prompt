@@ -145,7 +145,7 @@ prompt+="$user:"
 prompt+="$dir_colour"
 prompt+="$dir"
 prompt+="$src_ctrl"
-prompt+="$cyan>>$end "
+prompt+="$cyan>$end "
 
 echo "$prompt"
 
