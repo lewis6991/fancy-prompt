@@ -65,22 +65,22 @@ if [ "$in_git" == "" ]; then
     # Git
     #-----------------------------------------------------------------------
     has_src_ctrl=1
-    info=`timeout 2 git status -sbu 2> /dev/null`
-    ahead=`echo "$info" | grep 'ahead'  | sed -e 's/.*ahead\s\+\([0-9]\+\).*/+\1/g'`
-    behind=`echo "$info" | grep 'behind' | sed -e 's/.*behind\s\+\([0-9]\+\).*/-\1/g'`
+    info=`timeout 2 git status -sbu --porcelain 2> /dev/null`
+    ahead=`echo "$info" | grep 'ahead'  | sed -E 's/.*ahead[[:space:]]+([0-9]+).*/+\1/g'`
+    behind=`echo "$info" | grep 'behind' | sed -E 's/.*behind[[:space:]]+([0-9]+).*/-\1/g'`
     files="$info"
-    checkout=`echo "$info" | sed -e 's/##\s\+\([[:alnum:]_\/]\+\).*/\1/g' | head -n1`
+    checkout=`echo "$info" | sed -E 's/##[[:space:]]+([[:alnum:]_/\]+).*/\1/g' | head -n1`
 else
     #-----------------------------------------------------------------------
     # SVN
     #-----------------------------------------------------------------------
     info=`timeout 2 svn info 2> /dev/null`
-    rev=`echo "$info" | grep 'Revision' | sed 's/Revision: \([0-9]\+\)/\1/'`
+    rev=`echo "$info" | grep 'Revision' | sed -E 's/Revision: ([0-9]+)/\1/'`
 
     if [ "$rev" != "" ]; then
         has_src_ctrl=1
-        repo=`echo "$info" | grep 'Repository Root' | sed 's/Repository Root: \(.\+\)/\1/'`
-        repo_rev=`timeout 2 svn info $repo 2> /dev/null | grep 'Revision' | sed 's/Revision: \([0-9]\+\)/\1/'`
+        repo=`echo "$info" | grep 'Repository Root' | sed -E 's/Repository Root: (.+)/\1/'`
+        repo_rev=`timeout 2 svn info $repo 2> /dev/null | grep 'Revision' | sed -E 's/Revision: ([0-9]+)/\1/'`
         ahead=""
         behind=`expr $repo_rev - $rev`
 
@@ -100,21 +100,21 @@ fi
 #---------------------------------------------------------------------------
 src_ctrl=""
 if [ "$has_src_ctrl" == "1" ]; then
-    staged=`echo "$files" | grep '^\s*A' | wc -l`
+    staged=`echo "$files" | grep '^ *A' | wc -l`
     if [ "$staged" == "0" ]; then
          staged=""
     else
          staged="+$staged"
     fi
 
-    unstaged=`echo "$files" | grep '^\s*M' | wc -l`
+    unstaged=`echo "$files" | grep '^ *M' | wc -l`
     if [ "$unstaged" == "0" ]; then
          unstaged=""
     else
          unstaged="+$unstaged"
     fi
 
-    untracked=`echo "$files" | grep '^\s*?' | wc -l`
+    untracked=`echo "$files" | grep '^ *?' | wc -l`
     if [ "$untracked" == "0" ]; then
          untracked=""
     else
