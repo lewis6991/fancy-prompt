@@ -100,14 +100,14 @@ fi
 #---------------------------------------------------------------------------
 src_ctrl=""
 if [ "$has_src_ctrl" == "1" ]; then
-    staged=`echo "$files" | grep '^ *A' | wc -l`
+    staged=`echo "$files" | grep '^ *A\|^M' | wc -l`
     if [ "$staged" == "0" ]; then
          staged=""
     else
          staged="+$staged"
     fi
 
-    unstaged=`echo "$files" | grep '^ *M' | wc -l`
+    unstaged=`echo "$files" | grep '^ \+M' | wc -l`
     if [ "$unstaged" == "0" ]; then
          unstaged=""
     else
