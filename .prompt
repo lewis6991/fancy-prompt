@@ -57,6 +57,8 @@ fi
 
 in_git=`git rev-parse 2>&1`
 
+error=''
+
 #-------------------------------------------------------------------------------
 # Source Control
 #-------------------------------------------------------------------------------
@@ -74,22 +76,25 @@ else
     #-----------------------------------------------------------------------
     # SVN
     #-----------------------------------------------------------------------
-    info=`timeout 2 svn info 2> /dev/null`
+    info=`timeout 2 svn info 2> /tmp/prompt_debug`
     rev=`echo "$info" | grep 'Revision' | sed -E 's/Revision: ([0-9]+)/\1/'`
 
-    if [ "$rev" != "" ]; then
+    if [[ $rev =~ ^[0-9]+$ ]]; then
         has_src_ctrl=1
-        repo=`echo "$info" | grep 'Repository Root' | sed -E 's/Repository Root: (.+)/\1/'`
-        repo_rev=`timeout 2 svn info $repo 2> /dev/null | grep 'Revision' | sed -E 's/Revision: ([0-9]+)/\1/'`
-        ahead=""
-        behind=`expr $repo_rev - $rev`
-
-        if [ "$behind" == "0" ]; then
-             behind=""
+        repo=`echo "$info" | grep 'URL' | sed -E 's/URL: (.+)/\1/'`
+        remote_info=`timeout 2 svn info $repo 2> /tmp/prompt_debug`
+        remote_rev=`echo "$remote_info" | grep 'Revision' | sed -E 's/Revision: ([0-9]+)/\1/'`
+        if [[ $remote_rev =~ ^[0-9]+$ ]]; then
+            behind=`expr $remote_rev - $rev`
+            if [ "$behind" == "0" ]; then
+                 behind=""
+            else
+                 behind="-$behind"
+            fi
         else
-             behind="-$behind"
+            error="0"
         fi
-
+        ahead=""
         files=`timeout 2 svn status 2> /dev/null`
         checkout="r$rev"
     fi
@@ -140,11 +145,18 @@ fi
 #-------------------------------------------------------------------------------
 # Prompt
 #-------------------------------------------------------------------------------
+if [ "$error" != "" ]; then
+    error=" ${white}ERROR $error: $(cat /tmp/prompt_debug)"
+fi
+
 prompt="$ret_colour"
-prompt+="$user:"
-prompt+="$dir_colour"
-prompt+="$dir"
+if [ $(tput cols) -gt 80 ]; then
+    prompt+="$user:"
+    prompt+="$dir_colour"
+    prompt+="$dir"
+fi
 prompt+="$src_ctrl"
+prompt+="$error"
 prompt+="$cyan>$end "
 
 echo "$prompt"
