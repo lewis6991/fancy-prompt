@@ -99,8 +99,8 @@ if in_git; then
 
         checkout=$(\
             echo "$info" | \
-            sed 's/##[[:space:]]\+\([[:alnum:]_/\.-]\+\).*/\1/g' | \
             sed 's/\.\.\..*//g' | \
+            sed -E 's/##[[:space:]]+//g' | \
             sed -n '1 p')
         check_error "$?" "5"
 
@@ -118,8 +118,8 @@ if in_git; then
     info=$(timeout $TIMEOUT git status -sbu --porcelain $GIT_ST_OPTS)
     check_error "$?" "2"
 
-     ahead=$(echo "$info" | grep 'ahead'  | sed  's/.*ahead[[:space:]]\+\([0-9]\+\).*/+\1/g')
-    behind=$(echo "$info" | grep 'behind' | sed 's/.*behind[[:space:]]\+\([0-9]\+\).*/-\1/g')
+     ahead=$(echo "$info" | grep 'ahead'  | sed -E  's/.*ahead[[:space:]]+([0-9]+).*/+\1/g')
+    behind=$(echo "$info" | grep 'behind' | sed -E 's/.*behind[[:space:]]+([0-9]+).*/-\1/g')
     check_error "$?" "4"
 
     files="$info"
@@ -128,7 +128,7 @@ elif in_svn; then
 
     get_svn_local_rev() {
         info="$1"
-        echo "$info" | grep 'Revision' | sed 's/Revision: \([0-9]\+\)/\1/'
+        echo "$info" | grep 'Revision' | sed -E 's/Revision: ([0-9]+)/\1/'
     }
 
     get_svn_remote_rev() {
