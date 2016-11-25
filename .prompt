@@ -15,9 +15,9 @@ RET_CODE="$2"
 #-------------------------------------------------------------------------------
 # Configuration
 #-------------------------------------------------------------------------------
-  GIT_ST_OPTS="--ignore-submodules"
-      TIMEOUT=3
-DYNAMIC_WIDTH=1
+  GIT_STATUS_OPTS="--ignore-submodules"
+          TIMEOUT=5
+    DYNAMIC_WIDTH=1
 
 #-------------------------------------------------------------------------------
 # Constants
@@ -33,7 +33,7 @@ check_error() {
     RET_CODE="$1"
     CODE="$2"
     if [ "$RET_CODE" != 0 ]; then
-        echo "ERROR $CODE"
+        echo "ERROR $CODE > "
     fi
 }
 
@@ -43,7 +43,7 @@ in_git() {
 }
 
 in_svn() {
-    svn ls --depth empty > /dev/null 2>&1
+    \svn ls --depth empty > /dev/null 2>&1
     return $?
 }
 
@@ -104,9 +104,9 @@ if in_git; then
             sed -n '1 p')
         check_error "$?" "5"
 
-        if [ "$checkout" == "HEAD" ]; then
+        if [[ "$checkout" =~ "HEAD" ]]; then
             # Show short hash if not on a branch
-            checkout="HEAD:"$(git rev-parse --short HEAD)
+            checkout=$(git rev-parse --short HEAD)
             check_error "$?" "6"
         fi
 
@@ -115,7 +115,7 @@ if in_git; then
 
     has_src_ctrl=1
 
-    info=$(timeout $TIMEOUT git status -sbu --porcelain $GIT_ST_OPTS)
+    info=$(timeout $TIMEOUT git status -sbu --porcelain $GIT_STATUS_OPTS)
     check_error "$?" "2"
 
      ahead=$(echo "$info" | grep 'ahead'  | sed -E  's/.*ahead[[:space:]]+([0-9]+).*/+\1/g')
@@ -136,14 +136,14 @@ elif in_svn; then
 
         repo=$(echo "$info" | grep 'URL' | sed -E 's/URL: (.+)/\1/')
 
-        remote_info=$(timeout $TIMEOUT svn info $repo)
+        remote_info=$(timeout $TIMEOUT \svn info $repo)
         check_error "$?" "10"
 
         echo "$remote_info" | grep 'Revision' | sed -E 's/Revision: ([0-9]+)/\1/'
     }
 
     has_src_ctrl=1
-    info=$(timeout $TIMEOUT svn info)
+    info=$(timeout $TIMEOUT \svn info)
     check_error "$?" "7"
 
      local_rev=$(get_svn_local_rev  "$info")
@@ -151,7 +151,6 @@ elif in_svn; then
 
     if [[ $remote_rev =~ ^[0-9]+$ ]]; then
         behind=$(expr $remote_rev - $local_rev)
-        check_error "$?" "8"
 
         if [ "$behind" == "0" ]; then
              behind=""
@@ -163,7 +162,7 @@ elif in_svn; then
     fi
 
     ahead="" # SVN is never ahead
-    files=$(timeout $TIMEOUT svn status 2> /dev/null)
+    files=$(timeout $TIMEOUT \svn status 2> /dev/null)
     check_error "$?" "12"
 
     checkout="r$local_rev"
