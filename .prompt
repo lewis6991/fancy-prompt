@@ -16,7 +16,7 @@ RET_CODE="$2"
 # Configuration
 #-------------------------------------------------------------------------------
   GIT_STATUS_OPTS="--ignore-submodules"
-          TIMEOUT=5
+          TIMEOUT=3
     DYNAMIC_WIDTH=1
 
 #-------------------------------------------------------------------------------
@@ -42,9 +42,43 @@ in_git() {
     return $?
 }
 
+in_git_svn() {
+    if [ -d "$(git rev-parse --show-toplevel)/.git/svn" ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 in_svn() {
     \svn ls --depth empty > /dev/null 2>&1
     return $?
+}
+
+get_svn_local_rev() {
+    info="$1"
+    echo "$info" | grep 'Revision' | sed -E 's/Revision: ([0-9]+)/\1/'
+}
+
+get_svn_remote_rev() {
+    info="$1"
+
+    repo=$(echo "$info" | grep 'URL' | sed -E 's/URL: (.+)/\1/')
+
+    remote_info=$(timeout $TIMEOUT \svn info $repo)
+    check_error "$?" "10"
+
+    echo "$remote_info" | grep 'Revision' | sed -E 's/Revision: ([0-9]+)/\1/'
+}
+
+format_value() {
+    value=$1
+    prefix=$2
+    if [ "$value" == "0" ]; then
+         echo ""
+    else
+         echo "$prefix$value"
+    fi
 }
 
 #-------------------------------------------------------------------------------
@@ -94,54 +128,50 @@ fi
 # Source Control
 #-------------------------------------------------------------------------------
 if in_git; then
-    get_git_checkout() {
-        info="$1"
-
-        checkout=$(\
-            echo "$info" | \
-            sed 's/\.\.\..*//g' | \
-            sed -E 's/##[[:space:]]+//g' | \
-            sed -n '1 p')
-        check_error "$?" "5"
-
-        if [[ "$checkout" =~ "HEAD" ]]; then
-            # Show short hash if not on a branch
-            checkout=$(git rev-parse --short HEAD)
-            check_error "$?" "6"
-        fi
-
-        echo "$checkout"
-    }
-
     has_src_ctrl=1
 
     info=$(timeout $TIMEOUT git status -sbu --porcelain $GIT_STATUS_OPTS)
     check_error "$?" "2"
 
-     ahead=$(echo "$info" | grep 'ahead'  | sed -E  's/.*ahead[[:space:]]+([0-9]+).*/+\1/g')
-    behind=$(echo "$info" | grep 'behind' | sed -E 's/.*behind[[:space:]]+([0-9]+).*/-\1/g')
-    check_error "$?" "4"
-
     files="$info"
-    checkout=$(get_git_checkout "$info")
+
+    if in_git_svn; then
+        local_rev=$(git svn find-rev HEAD)
+        remote_rev=$(git svn find-rev git-svn)
+        if [[ $remote_rev =~ ^[0-9]+$ ]]; then
+            behind=$(expr $remote_rev - $local_rev)
+            behind=$(format_value $behind "-")
+        else
+            check_error "1" "9"
+        fi
+        checkout="r$local_rev"
+    else
+        ahead=$(echo "$info" | grep 'ahead'  | sed -E  's/.*ahead[[:space:]]+([0-9]+).*/+\1/g')
+       behind=$(echo "$info" | grep 'behind' | sed -E 's/.*behind[[:space:]]+([0-9]+).*/-\1/g')
+       check_error "$?" "4"
+
+       get_git_checkout() {
+           info="$1"
+
+           checkout=$(\
+               echo "$info" | \
+               sed 's/\.\.\..*//g' | \
+               sed -E 's/##[[:space:]]+//g' | \
+               sed -n '1 p')
+           check_error "$?" "5"
+
+           if [[ "$checkout" =~ "HEAD" ]]; then
+               # Show short hash if not on a branch
+               checkout=$(git rev-parse --short HEAD)
+               check_error "$?" "6"
+           fi
+
+           echo "$checkout"
+       }
+
+       checkout=$(get_git_checkout "$info")
+    fi
 elif in_svn; then
-
-    get_svn_local_rev() {
-        info="$1"
-        echo "$info" | grep 'Revision' | sed -E 's/Revision: ([0-9]+)/\1/'
-    }
-
-    get_svn_remote_rev() {
-        info="$1"
-
-        repo=$(echo "$info" | grep 'URL' | sed -E 's/URL: (.+)/\1/')
-
-        remote_info=$(timeout $TIMEOUT \svn info $repo)
-        check_error "$?" "10"
-
-        echo "$remote_info" | grep 'Revision' | sed -E 's/Revision: ([0-9]+)/\1/'
-    }
-
     has_src_ctrl=1
     info=$(timeout $TIMEOUT \svn info)
     check_error "$?" "7"
@@ -151,19 +181,16 @@ elif in_svn; then
 
     if [[ $remote_rev =~ ^[0-9]+$ ]]; then
         behind=$(expr $remote_rev - $local_rev)
-
-        if [ "$behind" == "0" ]; then
-             behind=""
-        else
-             behind="-$behind"
-        fi
+        behind=$(format_value $behind "-")
     else
         check_error "1" "9"
     fi
 
     ahead="" # SVN is never ahead
     files=$(timeout $TIMEOUT \svn status 2> /dev/null)
-    check_error "$?" "12"
+    if [[ "$?" != "0" ]]; then
+        files="?"
+    fi
 
     checkout="r$local_rev"
 fi
@@ -172,25 +199,19 @@ fi
 # Status
 #---------------------------------------------------------------------------
 if [ "$has_src_ctrl" == "1" ]; then
-    staged=$(echo "$files" | grep -c "$STAGED_PATTERN")
-    if [ "$staged" == "0" ]; then
-         staged=""
+    if [ "$files" == "?" ]; then
+        staged=""
+        unstaged=""
+        untracked="?"
     else
-         staged="+$staged"
-    fi
+        staged=$(echo "$files" | grep -c "$STAGED_PATTERN")
+        staged=$(format_value $staged "+")
 
-    unstaged=$(echo "$files" | grep -c "$UNSTAGED_PATTERN")
-    if [ "$unstaged" == "0" ]; then
-         unstaged=""
-    else
-         unstaged="+$unstaged"
-    fi
+        unstaged=$(echo "$files" | grep -c "$UNSTAGED_PATTERN")
+        unstaged=$(format_value $unstaged "+")
 
-    untracked=$(echo "$files" | grep -c "$UNTRACKED_PATTERN")
-    if [ "$untracked" == "0" ]; then
-         untracked=""
-    else
-         untracked="+$untracked"
+        untracked=$(echo "$files" | grep -c "$UNTRACKED_PATTERN")
+        untracked=$(format_value $untracked "+")
     fi
 
     src_ctrl=""
