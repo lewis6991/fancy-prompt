@@ -9,20 +9,21 @@
 #-------------------------------------------------------------------------------
 # Arguments
 #-------------------------------------------------------------------------------
-SHELL="$1"
+   SHELL="$1"
 RET_CODE="$2"
 
 #-------------------------------------------------------------------------------
 # Configuration
 #-------------------------------------------------------------------------------
   GIT_STATUS_OPTS="--ignore-submodules"
-          TIMEOUT=3
+          TIMEOUT=2
     DYNAMIC_WIDTH=1
+      USE_SYMBOLS=1
 
 #-------------------------------------------------------------------------------
 # Constants
 #-------------------------------------------------------------------------------
-   STAGED_PATTERN="^ *A\|^M"
+   STAGED_PATTERN="^ *A\|^M\|^D"
  UNSTAGED_PATTERN="^ \+M"
 UNTRACKED_PATTERN="^ *?"
 
@@ -33,7 +34,7 @@ check_error() {
     RET_CODE="$1"
     CODE="$2"
     if [ "$RET_CODE" != 0 ]; then
-        echo "ERROR $CODE > "
+        echo "ERROR $CODE"
     fi
 }
 
@@ -43,10 +44,11 @@ in_git() {
 }
 
 in_git_svn() {
+    return 1
     if [ -d "$(git rev-parse --show-toplevel)/.git/svn" ]; then
-        return 0
-    else
         return 1
+    else
+        return 0
     fi
 }
 
@@ -96,6 +98,9 @@ else # csh/tcsh
         dir="%c"
 fi
 
+reverse="${c_start}\e[3;35m${c_end}"
+underlined="${c_start}\e[4;35m${c_end}"
+dim="${c_start}\e[10;35m${c_end}"
    gray="${c_start}\e[1;30m${c_end}"
     red="${c_start}\e[1;31m${c_end}"
   green="${c_start}\e[1;32m${c_end}"
@@ -131,102 +136,120 @@ if in_git; then
     has_src_ctrl=1
 
     info=$(timeout $TIMEOUT git status -sbu --porcelain $GIT_STATUS_OPTS)
-    check_error "$?" "2"
+    error=$(check_error "$?" "2")
 
     files="$info"
 
-    if in_git_svn; then
-        local_rev=$(git svn find-rev HEAD)
-        remote_rev=$(git svn find-rev git-svn)
-        if [[ $remote_rev =~ ^[0-9]+$ ]]; then
-            behind=$(expr $remote_rev - $local_rev)
-            behind=$(format_value $behind "-")
+    if [ "$error" == "" ]; then
+        if in_git_svn; then
+            local_rev=$(git svn find-rev HEAD)
+            remote_rev=$(git svn find-rev git-svn)
+            if [[ $remote_rev =~ ^[0-9]+$ ]]; then
+                behind=$(expr $remote_rev - $local_rev)
+                behind=$(format_value $behind "-")
+            else
+                error=$(check_error "1" "9")
+            fi
+            if [ "$error" == "" ]; then
+                checkout="r$local_rev"
+                git svn fetch &
+            fi
         else
-            check_error "1" "9"
-        fi
-        checkout="r$local_rev"
-    else
-        ahead=$(echo "$info" | grep 'ahead'  | sed -E  's/.*ahead[[:space:]]+([0-9]+).*/+\1/g')
-       behind=$(echo "$info" | grep 'behind' | sed -E 's/.*behind[[:space:]]+([0-9]+).*/-\1/g')
-       check_error "$?" "4"
+            ahead=$(echo "$info" | grep 'ahead'  | sed -E  's/.*ahead[[:space:]]+([0-9]+).*/+\1/g')
+           behind=$(echo "$info" | grep 'behind' | sed -E 's/.*behind[[:space:]]+([0-9]+).*/-\1/g')
+           error=$(check_error "$?" "4")
 
-       get_git_checkout() {
-           info="$1"
+           if [ "$error" == "" ]; then
+               get_git_checkout() {
+                   info="$1"
 
-           checkout=$(\
-               echo "$info" | \
-               sed 's/\.\.\..*//g' | \
-               sed -E 's/##[[:space:]]+//g' | \
-               sed -n '1 p')
-           check_error "$?" "5"
+                   checkout=$(\
+                       echo "$info" | \
+                       sed 's/\.\.\..*//g' | \
+                       sed -E 's/##[[:space:]]+//g' | \
+                       sed -n '1 p')
+                   error=$(check_error "$?" "5")
 
-           if [[ "$checkout" =~ "HEAD" ]]; then
-               # Show short hash if not on a branch
-               checkout=$(git rev-parse --short HEAD)
-               check_error "$?" "6"
+                   if [[ "$checkout" =~ "HEAD" ]]; then
+                       # Show short hash if not on a branch
+                       checkout=$(git rev-parse --short HEAD)
+                       error=$(check_error "$?" "6")
+                   fi
+
+                   if [ "$USE_SYMBOLS" == 1 ]; then
+                       symbol=""
+                   else
+                       symbol=""
+                   fi
+                   echo "$symbol$checkout"
+               }
+
+               checkout=$(get_git_checkout "$info")
            fi
-
-           echo "$checkout"
-       }
-
-       checkout=$(get_git_checkout "$info")
+        fi
     fi
 elif in_svn; then
     has_src_ctrl=1
     info=$(timeout $TIMEOUT \svn info)
-    check_error "$?" "7"
+    error=$(check_error "$?" "7")
+    if [ "$error" == "" ]; then
+         local_rev=$(get_svn_local_rev  "$info")
+        remote_rev=$(get_svn_remote_rev "$info")
 
-     local_rev=$(get_svn_local_rev  "$info")
-    remote_rev=$(get_svn_remote_rev "$info")
+        if [[ $remote_rev =~ ^[0-9]+$ ]]; then
+            behind=$(expr $remote_rev - $local_rev)
+            behind=$(format_value $behind "-")
+        else
+            error=$(check_error "1" "9")
+        fi
 
-    if [[ $remote_rev =~ ^[0-9]+$ ]]; then
-        behind=$(expr $remote_rev - $local_rev)
-        behind=$(format_value $behind "-")
-    else
-        check_error "1" "9"
+        ahead="" # SVN is never ahead
+        files=$(timeout $TIMEOUT \svn status 2> /dev/null)
+        if [[ "$?" != "0" ]]; then
+            files="?"
+        fi
+
+        checkout="r$local_rev"
     fi
-
-    ahead="" # SVN is never ahead
-    files=$(timeout $TIMEOUT \svn status 2> /dev/null)
-    if [[ "$?" != "0" ]]; then
-        files="?"
-    fi
-
-    checkout="r$local_rev"
 fi
 
 #---------------------------------------------------------------------------
 # Status
 #---------------------------------------------------------------------------
 if [ "$has_src_ctrl" == "1" ]; then
-    if [ "$files" == "?" ]; then
-        staged=""
-        unstaged=""
-        untracked="?"
-    else
-        staged=$(echo "$files" | grep -c "$STAGED_PATTERN")
-        staged=$(format_value $staged "+")
-
-        unstaged=$(echo "$files" | grep -c "$UNSTAGED_PATTERN")
-        unstaged=$(format_value $unstaged "+")
-
-        untracked=$(echo "$files" | grep -c "$UNTRACKED_PATTERN")
-        untracked=$(format_value $untracked "+")
-    fi
-
     src_ctrl=""
     src_ctrl+="$src_ctl_colour"
     src_ctrl+="["
-    src_ctrl+="$checkout"
-    src_ctrl+="$white"
-    src_ctrl+="$ahead"
-    src_ctrl+="$behind"
-    src_ctrl+="$green"
-    src_ctrl+="$staged"
-    src_ctrl+="$red"
-    src_ctrl+="$unstaged"
-    src_ctrl+="$magenta"
-    src_ctrl+="$untracked"
+    if [ "$error" == "" ]; then
+        if [ "$files" == "?" ]; then
+            staged=""
+            unstaged=""
+            untracked="?"
+        else
+            staged=$(echo "$files" | grep -c "$STAGED_PATTERN")
+            staged=$(format_value $staged "+")
+
+            unstaged=$(echo "$files" | grep -c "$UNSTAGED_PATTERN")
+            unstaged=$(format_value $unstaged "+")
+
+            untracked=$(echo "$files" | grep -c "$UNTRACKED_PATTERN")
+            untracked=$(format_value $untracked "+")
+        fi
+
+        src_ctrl+="$checkout"
+        src_ctrl+="$white"
+        src_ctrl+="$ahead"
+        src_ctrl+="$behind"
+        src_ctrl+="$green"
+        src_ctrl+="$staged"
+        src_ctrl+="$red"
+        src_ctrl+="$unstaged"
+        src_ctrl+="$magenta"
+        src_ctrl+="$untracked"
+    else
+        src_ctrl+="$red"
+        src_ctrl+="$error"
+    fi
     src_ctrl+="$src_ctl_colour"
     src_ctrl+="]"
 fi
@@ -236,17 +259,26 @@ fi
 #-------------------------------------------------------------------------------
 prompt=""
 
+cols=$(tput cols)
+
 # Adjust prompt according on terminal width.
-if [ $(tput cols) -gt 80 ] || [ "$DYNAMIC_WIDTH" == 0 ]; then
-    prompt+="$cyan"
-    prompt+="$user:"
+if [ $cols -gt 60 ] || [ "$DYNAMIC_WIDTH" == 0 ]; then
+    if [ $cols -gt 80 ] || [ "$DYNAMIC_WIDTH" == 0 ]; then
+        prompt+="$cyan"
+        prompt+="$user:"
+    fi
     prompt+="$dir_colour"
     prompt+="$dir"
 fi
 
 prompt+="$src_ctrl"
-prompt+="$error"
-prompt+="$ret_colour>$end "
+
+if [ "$USE_SYMBOLS" == 0 ]; then
+    prompt+="$ret_colour>$end "
+else
+    prompt+="$ret_colour▶$end "
+    # prompt+="$ret_colour$end "
+fi
 
 echo "$prompt"
 
