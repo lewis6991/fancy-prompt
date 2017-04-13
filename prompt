@@ -15,15 +15,15 @@ RET_CODE="$2"
 #-------------------------------------------------------------------------------
 # Configuration
 #-------------------------------------------------------------------------------
-  GIT_STATUS_OPTS="--ignore-submodules"
-          TIMEOUT=2
+  GIT_STATUS_OPTS="-uno --ignore-submodules"
+          TIMEOUT=3
     DYNAMIC_WIDTH=1
       USE_SYMBOLS=1
 
 #-------------------------------------------------------------------------------
 # Constants
 #-------------------------------------------------------------------------------
-   STAGED_PATTERN="^ *A\|^M\|^D"
+   STAGED_PATTERN="^ *A\|^M\|^D\|^R"
  UNSTAGED_PATTERN="^ \+M"
 UNTRACKED_PATTERN="^ *?"
 
@@ -91,29 +91,33 @@ if [ "$SHELL" == "bash" ]; then
       c_end="\]"
        user="\u"
         dir="\W"
-else # csh/tcsh
+       host="\H"
+else # csh, tcsh and zsh
     c_start="%{"
       c_end="%}"
        user="%n"
         dir="%c"
+       host="%m"
 fi
 
-reverse="${c_start}\e[3;35m${c_end}"
+   reverse="${c_start}\e[3;35m${c_end}"
 underlined="${c_start}\e[4;35m${c_end}"
-dim="${c_start}\e[10;35m${c_end}"
-   gray="${c_start}\e[1;30m${c_end}"
-    red="${c_start}\e[1;31m${c_end}"
-  green="${c_start}\e[1;32m${c_end}"
- yellow="${c_start}\e[1;33m${c_end}"
-   blue="${c_start}\e[1;34m${c_end}"
-magenta="${c_start}\e[1;35m${c_end}"
-   cyan="${c_start}\e[1;36m${c_end}"
-  white="${c_start}\e[1;37m${c_end}"
-    end="${c_start}\e[0m${c_end}" # This is needed at the end.
+       dim="${c_start}\e[10;35m${c_end}"
+      gray="${c_start}\e[1;30m${c_end}"
+       red="${c_start}\e[1;31m${c_end}"
+     green="${c_start}\e[1;32m${c_end}"
+    yellow="${c_start}\e[1;33m${c_end}"
+      blue="${c_start}\e[1;34m${c_end}"
+   magenta="${c_start}\e[1;35m${c_end}"
+      cyan="${c_start}\e[1;36m${c_end}"
+     white="${c_start}\e[1;37m${c_end}"
+       end="${c_start}\e[0m${c_end}" # This is needed at the end.
 
 # Use a different colour for each shell.
 if [ "$SHELL" == "bash" ]; then
     dir_colour="$yellow"
+elif [ "$SHELL" == "zsh" ]; then
+    dir_colour="$green"
 else
     dir_colour="$magenta"
 fi
@@ -135,7 +139,7 @@ fi
 if in_git; then
     has_src_ctrl=1
 
-    info=$(timeout $TIMEOUT git status -sbu --porcelain $GIT_STATUS_OPTS)
+    info=$(timeout $TIMEOUT git status --untracked-files=normal --branch --porcelain $GIT_STATUS_OPTS)
     error=$(check_error "$?" "2")
 
     files="$info"
@@ -265,7 +269,8 @@ cols=$(tput cols)
 if [ $cols -gt 60 ] || [ "$DYNAMIC_WIDTH" == 0 ]; then
     if [ $cols -gt 80 ] || [ "$DYNAMIC_WIDTH" == 0 ]; then
         prompt+="$cyan"
-        prompt+="$user:"
+        prompt+="$host:"
+        # prompt+="$user:"
     fi
     prompt+="$dir_colour"
     prompt+="$dir"
@@ -281,4 +286,3 @@ else
 fi
 
 echo "$prompt"
-
