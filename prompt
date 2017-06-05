@@ -15,7 +15,8 @@ RET_CODE="$2"
 #-------------------------------------------------------------------------------
 # Configuration
 #-------------------------------------------------------------------------------
-  GIT_STATUS_OPTS="-uno --ignore-submodules"
+  GIT_STATUS_OPTS="--ignore-submodules"
+  # GIT_STATUS_OPTS="-uno --ignore-submodules"
           TIMEOUT=3
     DYNAMIC_WIDTH=1
       USE_SYMBOLS=1
@@ -26,6 +27,12 @@ RET_CODE="$2"
    STAGED_PATTERN="^ *A\|^M\|^D\|^R"
  UNSTAGED_PATTERN="^ \+M"
 UNTRACKED_PATTERN="^ *?"
+
+#-------------------------------------------------------------------------------
+# Init
+#-------------------------------------------------------------------------------
+# Unalias all aliases
+unalias -a
 
 #-------------------------------------------------------------------------------
 # Functions
@@ -53,7 +60,7 @@ in_git_svn() {
 }
 
 in_svn() {
-    \svn ls --depth empty > /dev/null 2>&1
+    svn ls --depth empty > /dev/null 2>&1
     return $?
 }
 
@@ -67,7 +74,7 @@ get_svn_remote_rev() {
 
     repo=$(echo "$info" | grep 'URL' | sed -E 's/URL: (.+)/\1/')
 
-    remote_info=$(timeout $TIMEOUT \svn info $repo)
+    remote_info=$(timeout "$TIMEOUT" svn info "$repo")
     check_error "$?" "10"
 
     echo "$remote_info" | grep 'Revision' | sed -E 's/Revision: ([0-9]+)/\1/'
@@ -76,7 +83,7 @@ get_svn_remote_rev() {
 format_value() {
     value=$1
     prefix=$2
-    if [ "$value" == "0" ]; then
+    if [ -z "$value" ] || [ "$value" == "0" ]; then
          echo ""
     else
          echo "$prefix$value"
@@ -149,8 +156,7 @@ if in_git; then
             local_rev=$(git svn find-rev HEAD)
             remote_rev=$(git svn find-rev git-svn)
             if [[ $remote_rev =~ ^[0-9]+$ ]]; then
-                behind=$(expr $remote_rev - $local_rev)
-                behind=$(format_value $behind "-")
+                behind=$((remote_rev - local_rev))
             else
                 error=$(check_error "1" "9")
             fi
@@ -159,8 +165,8 @@ if in_git; then
                 git svn fetch &
             fi
         else
-            ahead=$(echo "$info" | grep 'ahead'  | sed -E  's/.*ahead[[:space:]]+([0-9]+).*/+\1/g')
-           behind=$(echo "$info" | grep 'behind' | sed -E 's/.*behind[[:space:]]+([0-9]+).*/-\1/g')
+            ahead=$(echo "$info" | grep 'ahead'  | sed -E  's/.*ahead[[:space:]]+([0-9]+).*/\1/g')
+           behind=$(echo "$info" | grep 'behind' | sed -E 's/.*behind[[:space:]]+([0-9]+).*/\1/g')
            error=$(check_error "$?" "4")
 
            if [ "$error" == "" ]; then
@@ -188,31 +194,31 @@ if in_git; then
                    echo "$symbol$checkout"
                }
 
+               stashed=$(git stash list | wc -l)
                checkout=$(get_git_checkout "$info")
            fi
         fi
     fi
 elif in_svn; then
     has_src_ctrl=1
-    info=$(timeout $TIMEOUT \svn info)
+    info=$(timeout $TIMEOUT svn info)
     error=$(check_error "$?" "7")
     if [ "$error" == "" ]; then
          local_rev=$(get_svn_local_rev  "$info")
         remote_rev=$(get_svn_remote_rev "$info")
 
         if [[ $remote_rev =~ ^[0-9]+$ ]]; then
-            behind=$(expr $remote_rev - $local_rev)
-            behind=$(format_value $behind "-")
+            behind=$((remote_rev - local_rev))
         else
             error=$(check_error "1" "9")
         fi
 
         ahead="" # SVN is never ahead
-        files=$(timeout $TIMEOUT \svn status 2> /dev/null)
-        if [[ "$?" != "0" ]]; then
+        if files=$(timeout $TIMEOUT svn status 2> /dev/null); then
             files="?"
         fi
 
+        stashed=""
         checkout="r$local_rev"
     fi
 fi
@@ -231,14 +237,18 @@ if [ "$has_src_ctrl" == "1" ]; then
             untracked="?"
         else
             staged=$(echo "$files" | grep -c "$STAGED_PATTERN")
-            staged=$(format_value $staged "+")
+            staged=$(format_value "$staged" "+")
 
             unstaged=$(echo "$files" | grep -c "$UNSTAGED_PATTERN")
-            unstaged=$(format_value $unstaged "+")
+            unstaged=$(format_value "$unstaged" "~")
 
             untracked=$(echo "$files" | grep -c "$UNTRACKED_PATTERN")
-            untracked=$(format_value $untracked "+")
+            untracked=$(format_value "$untracked" "+")
         fi
+
+        ahead=$(format_value "$ahead" "+")
+        behind=$(format_value "$behind" "-")
+        stashed=$(format_value "$stashed" "^")
 
         src_ctrl+="$checkout"
         src_ctrl+="$white"
@@ -250,6 +260,8 @@ if [ "$has_src_ctrl" == "1" ]; then
         src_ctrl+="$unstaged"
         src_ctrl+="$magenta"
         src_ctrl+="$untracked"
+        src_ctrl+="$yellow"
+        src_ctrl+="$stashed"
     else
         src_ctrl+="$red"
         src_ctrl+="$error"
@@ -266,8 +278,8 @@ prompt=""
 cols=$(tput cols)
 
 # Adjust prompt according on terminal width.
-if [ $cols -gt 60 ] || [ "$DYNAMIC_WIDTH" == 0 ]; then
-    if [ $cols -gt 80 ] || [ "$DYNAMIC_WIDTH" == 0 ]; then
+if [ "$cols" -gt 60 ] || [ "$DYNAMIC_WIDTH" == 0 ]; then
+    if [ "$cols" -gt 80 ] || [ "$DYNAMIC_WIDTH" == 0 ]; then
         prompt+="$cyan"
         prompt+="$host:"
         # prompt+="$user:"
@@ -282,7 +294,6 @@ if [ "$USE_SYMBOLS" == 0 ]; then
     prompt+="$ret_colour>$end "
 else
     prompt+="$ret_colour▶$end "
-    # prompt+="$ret_colour$end "
 fi
 
 echo "$prompt"
