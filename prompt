@@ -16,11 +16,10 @@ RET_CODE="$2"
 # Configuration
 #-------------------------------------------------------------------------------
   GIT_STATUS_OPTS="--ignore-submodules"
-  # GIT_STATUS_OPTS="-uno --ignore-submodules"
-          TIMEOUT=3
+          TIMEOUT=${FANCY_PROMPT_TIMEOUT:-3}
          TIMEOUT2=$(( $TIMEOUT * 2))
-    DYNAMIC_WIDTH=1
-      USE_SYMBOLS=1
+    DYNAMIC_WIDTH=${FANCY_PROMPT_DYNAMIC_WIDTH:-1}
+      USE_SYMBOLS=${FANCY_PROMP_USE_SYMBOLS:-1}
 
 #-------------------------------------------------------------------------------
 # Constants
