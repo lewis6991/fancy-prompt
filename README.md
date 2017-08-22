@@ -4,6 +4,11 @@ Features
 * Gives you basic information about your git or svn checkout.
 * Supports bash, csh and tcsh.
 
+Screenshot
+==========
+
+![img](screen.png)
+
 Installation for Bash
 =====================
 ```bash
