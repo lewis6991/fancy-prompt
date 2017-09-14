@@ -1,0 +1,14 @@
+login7:fancy-prompt[master+2+1~1+1^1]▶
+▲      ▲            ▲       ▲ ▲ ▲ ▲ ▲
+┃      ┃            ┃       ┃ ┃ ┃ ┃ ┗ Stashes
+┃      ┃            ┃       ┃ ┃ ┃ ┗━━ Untracked files
+┃      ┃            ┃       ┃ ┃ ┗━━━━ Unstaged changes
+┃      ┃            ┃       ┃ ┗━━━━━━ Staged changes
+┃      ┃            ┃       ┗━━━━━━━━ Commits ahead/behind
+┃      ┃            ┗━━━━━━━━━━━━━━━━ Branch
+┃      ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Current working directory
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Hostname
+
+
+
+

@@ -17,16 +17,11 @@ RET_CODE="$2"
 #-------------------------------------------------------------------------------
   GIT_STATUS_OPTS="--ignore-submodules"
           TIMEOUT=${FANCY_PROMPT_TIMEOUT:-3}
-         TIMEOUT2=$(( $TIMEOUT * 2))
+         TIMEOUT2=$((TIMEOUT*2))
     DYNAMIC_WIDTH=${FANCY_PROMPT_DYNAMIC_WIDTH:-1}
       USE_SYMBOLS=${FANCY_PROMP_USE_SYMBOLS:-1}
-
-#-------------------------------------------------------------------------------
-# Constants
-#-------------------------------------------------------------------------------
-   STAGED_PATTERN="^ *A\|^M\|^D\|^R"
- UNSTAGED_PATTERN="^ \+M\|UU"
-UNTRACKED_PATTERN="^ *?"
+      USE_SYMBOLS=${FANCY_PROMP_USE_SYMBOLS:-1}
+    FETCH_TIMEOUT=${FANCY_PROMP_FETCH_TIMEOUT:-1}
 
 #-------------------------------------------------------------------------------
 # Init
@@ -35,13 +30,23 @@ UNTRACKED_PATTERN="^ *?"
 unalias -a
 
 #-------------------------------------------------------------------------------
+# Globals
+#-------------------------------------------------------------------------------
+CHECKOUT=""
+AHEAD=""
+BEHIND=""
+STASHES=""
+PORCELAIN_INFO=""
+
+#-------------------------------------------------------------------------------
 # Functions
 #-------------------------------------------------------------------------------
 check_error() {
     RET_CODE="$1"
     CODE="$2"
     if [ "$RET_CODE" != 0 ]; then
-        echo "ERROR $CODE"
+        echo "ERROR $CODE:$RET_CODE"
+        exit 1
     fi
 }
 
@@ -88,6 +93,186 @@ format_value() {
     else
          echo "$prefix$value"
     fi
+}
+
+vercomp () {
+    if [[ "$1" == "$2" ]]; then
+        return 0
+    fi
+    local IFS=.
+    local i ver1=($1) ver2=($2)
+    # fill empty fields in ver1 with zeros
+    for ((i=${#ver1[@]}; i<${#ver2[@]}; i++)); do
+        ver1[i]=0
+    done
+    for ((i=0; i<${#ver1[@]}; i++)); do
+        if [[ -z ${ver2[i]} ]]; then
+            # fill empty fields in ver2 with zeros
+            ver2[i]=0
+        fi
+        if ((10#${ver1[i]} > 10#${ver2[i]})); then
+            return 0
+        fi
+    done
+    return 1
+}
+
+git_bg_fetch() {
+    if [[ -n $(git remote show) ]]; then
+        local repo
+        local fetch_head
+
+        repo=$(git rev-parse --show-toplevel 2> /dev/null)
+        fetch_head="$repo/.git/FETCH_HEAD"
+
+        if [[ -e "$fetch_head" ]]; then
+            local old_head
+
+            old_head=$(find "$fetch_head" -mmin +"$FETCH_TIMEOUT" 2> /dev/null)
+
+            if [[ -n "$old_head" ]]; then
+                git fetch --quiet &> /dev/null
+            fi
+        fi
+    fi
+}
+
+set_git_info() {
+    local git_version
+    local info
+
+    git_version=$(git --version | sed -E 's/git version ([0-9.]+)/\1/g')
+
+    if vercomp "$git_version" "1.7.2"; then
+        info=$(timeout $TIMEOUT2 git status --untracked-files=normal --branch --porcelain $GIT_STATUS_OPTS)
+    else
+        info=$(timeout $TIMEOUT2 git status --untracked-files=normal --porcelain)
+    fi
+
+    error=$(check_error "$?" "2")
+
+    PORCELAIN_INFO="$info"
+
+    if [ "$error" == "" ]; then
+        if in_git_svn; then
+            local local_rev
+            local remote_rev
+
+            local_rev=$(git svn find-rev HEAD)
+            remote_rev=$(git svn find-rev git-svn)
+
+            if [[ $remote_rev =~ ^[0-9]+$ ]]; then
+                BEHIND=$((remote_rev - local_rev))
+            else
+                error=$(check_error "1" "9")
+            fi
+
+            if [ "$error" == "" ]; then
+                CHECKOUT="r$local_rev"
+                git svn fetch &
+            fi
+        else
+            AHEAD=$(echo "$info" | grep 'ahead'  | sed -E  's/.*ahead[[:space:]]+([0-9]+).*/\1/g')
+            BEHIND=$(echo "$info" | grep 'behind' | sed -E 's/.*behind[[:space:]]+([0-9]+).*/\1/g')
+            error=$(check_error "$?" "4")
+
+            if [ "$error" == "" ]; then
+                get_git_checkout() {
+                    local info
+                    local symbol=""
+
+                    info="$1"
+
+                    CHECKOUT=$(\
+                        echo "$info" | \
+                        sed 's/\.\.\..*//g' | \
+                        sed -E 's/##[[:space:]]+//g' | \
+                        sed -n '1 p')
+                    error=$(check_error "$?" "5")
+
+                    if [[ "$CHECKOUT" =~ "HEAD" ]]; then
+                        # Show short hash if not on a branch
+                        CHECKOUT=$(git rev-parse --short HEAD)
+                        error=$(check_error "$?" "6")
+                    fi
+
+                    if [ "$USE_SYMBOLS" == 1 ]; then
+                        symbol=""
+                    fi
+
+                    echo "$symbol$CHECKOUT"
+                }
+
+                STASHES=$(git stash list | wc -l)
+                if vercomp "$git_version" "1.7.2"; then
+                    CHECKOUT=$(get_git_checkout "$info")
+                else
+                    CHECKOUT=$(git rev-parse --abbrev-ref HEAD)
+                fi
+            fi
+        fi
+    fi
+
+    git_bg_fetch &
+}
+
+set_svn_info() {
+    local info
+    info=$(timeout "$TIMEOUT" svn info)
+    error=$(check_error "$?" "7")
+    if [ "$error" == "" ]; then
+        local local_rev
+        local remote_rev
+
+        local_rev=$(get_svn_local_rev "$info")
+        remote_rev=$(get_svn_remote_rev "$info")
+
+        if [[ $remote_rev =~ ^[0-9]+$ ]]; then
+            BEHIND=$((remote_rev - local_rev))
+        else
+            error=$(check_error "1" "9")
+        fi
+
+        if PORCELAIN_INFO=$(timeout "$TIMEOUT" svn status 2> /dev/null); then
+            PORCELAIN_INFO="?"
+        fi
+
+        CHECKOUT="r$local_rev"
+    fi
+}
+
+get_scm_prompt() {
+    local src_ctrl
+    local staged=""
+    local unstaged=""
+    local untracked="?"
+    local conflicts=""
+
+    src_ctrl="$src_ctl_colour["
+
+    if [ "$error" == "" ]; then
+        if [ "$PORCELAIN_INFO" != "?" ]; then
+            staged=$(echo "$PORCELAIN_INFO" | grep -c "^ *A\|^M\|^D\|^R")
+            unstaged=$(echo "$PORCELAIN_INFO" | grep -c "^ \+M\|UU")
+            untracked=$(echo "$PORCELAIN_INFO" | grep -c "^ *?")
+            conflicts=$(echo "$PORCELAIN_INFO" | grep -c "^MM")
+        fi
+
+        src_ctrl+="$CHECKOUT"
+        src_ctrl+="$white"
+        src_ctrl+="$(format_value "$AHEAD" "↑")"
+        src_ctrl+="$(format_value "$BEHIND" "↓")"
+        src_ctrl+="$green$(format_value "$staged" "●")"
+        src_ctrl+="$red$(format_value "$conflicts" "✖")"
+        src_ctrl+="$red$(format_value "$unstaged" "✚")"
+        src_ctrl+="$magenta$(format_value "$untracked" "…")"
+        src_ctrl+="$yellow$(format_value "$STASHES" "⚑")"
+    else
+        src_ctrl+="$red$error"
+    fi
+    src_ctrl+="$src_ctl_colour]"
+
+    echo "$src_ctrl"
 }
 
 #-------------------------------------------------------------------------------
@@ -151,131 +336,11 @@ if pwd | grep -q "\.git"; then
 fi
 
 if in_git; then
-    has_src_ctrl=1
-
-    info=$(timeout $TIMEOUT2 git status --untracked-files=normal --branch --porcelain $GIT_STATUS_OPTS)
-    error=$(check_error "$?" "2")
-
-    files="$info"
-
-    if [ "$error" == "" ]; then
-        if in_git_svn; then
-            local_rev=$(git svn find-rev HEAD)
-            remote_rev=$(git svn find-rev git-svn)
-            if [[ $remote_rev =~ ^[0-9]+$ ]]; then
-                behind=$((remote_rev - local_rev))
-            else
-                error=$(check_error "1" "9")
-            fi
-            if [ "$error" == "" ]; then
-                checkout="r$local_rev"
-                git svn fetch &
-            fi
-        else
-            ahead=$(echo "$info" | grep 'ahead'  | sed -E  's/.*ahead[[:space:]]+([0-9]+).*/\1/g')
-           behind=$(echo "$info" | grep 'behind' | sed -E 's/.*behind[[:space:]]+([0-9]+).*/\1/g')
-           error=$(check_error "$?" "4")
-
-           if [ "$error" == "" ]; then
-               get_git_checkout() {
-                   info="$1"
-
-                   checkout=$(\
-                       echo "$info" | \
-                       sed 's/\.\.\..*//g' | \
-                       sed -E 's/##[[:space:]]+//g' | \
-                       sed -n '1 p')
-                   error=$(check_error "$?" "5")
-
-                   if [[ "$checkout" =~ "HEAD" ]]; then
-                       # Show short hash if not on a branch
-                       checkout=$(git rev-parse --short HEAD)
-                       error=$(check_error "$?" "6")
-                   fi
-
-                   if [ "$USE_SYMBOLS" == 1 ]; then
-                       symbol=""
-                   else
-                       symbol=""
-                   fi
-                   echo "$symbol$checkout"
-               }
-
-               stashed=$(git stash list | wc -l)
-               checkout=$(get_git_checkout "$info")
-           fi
-        fi
-    fi
-    git fetch --quiet -n > /dev/null 2>&1 &
+    set_git_info
+    prompt_info=$(get_scm_prompt)
 elif in_svn; then
-    has_src_ctrl=1
-    info=$(timeout $TIMEOUT svn info)
-    error=$(check_error "$?" "7")
-    if [ "$error" == "" ]; then
-         local_rev=$(get_svn_local_rev  "$info")
-        remote_rev=$(get_svn_remote_rev "$info")
-
-        if [[ $remote_rev =~ ^[0-9]+$ ]]; then
-            behind=$((remote_rev - local_rev))
-        else
-            error=$(check_error "1" "9")
-        fi
-
-        ahead="" # SVN is never ahead
-        if files=$(timeout $TIMEOUT svn status 2> /dev/null); then
-            files="?"
-        fi
-
-        stashed=""
-        checkout="r$local_rev"
-    fi
-fi
-
-#---------------------------------------------------------------------------
-# Status
-#---------------------------------------------------------------------------
-if [ "$has_src_ctrl" == "1" ]; then
-    src_ctrl=""
-    src_ctrl+="$src_ctl_colour"
-    src_ctrl+="["
-    if [ "$error" == "" ]; then
-        if [ "$files" == "?" ]; then
-            staged=""
-            unstaged=""
-            untracked="?"
-        else
-            staged=$(echo "$files" | grep -c "$STAGED_PATTERN")
-            staged=$(format_value "$staged" "+")
-
-            unstaged=$(echo "$files" | grep -c "$UNSTAGED_PATTERN")
-            unstaged=$(format_value "$unstaged" "~")
-
-            untracked=$(echo "$files" | grep -c "$UNTRACKED_PATTERN")
-            untracked=$(format_value "$untracked" "+")
-        fi
-
-        ahead=$(format_value "$ahead" "+")
-        behind=$(format_value "$behind" "-")
-        stashed=$(format_value "$stashed" "^")
-
-        src_ctrl+="$checkout"
-        src_ctrl+="$white"
-        src_ctrl+="$ahead"
-        src_ctrl+="$behind"
-        src_ctrl+="$green"
-        src_ctrl+="$staged"
-        src_ctrl+="$red"
-        src_ctrl+="$unstaged"
-        src_ctrl+="$magenta"
-        src_ctrl+="$untracked"
-        src_ctrl+="$yellow"
-        src_ctrl+="$stashed"
-    else
-        src_ctrl+="$red"
-        src_ctrl+="$error"
-    fi
-    src_ctrl+="$src_ctl_colour"
-    src_ctrl+="]"
+    set_svn_info
+    prompt_info=$(get_scm_prompt)
 fi
 
 #-------------------------------------------------------------------------------
@@ -296,7 +361,7 @@ if [ "$cols" -gt 60 ] || [ "$DYNAMIC_WIDTH" == 0 ]; then
     prompt+="$dir"
 fi
 
-prompt+="$src_ctrl"
+prompt+="$prompt_info"
 
 if [ "$USE_SYMBOLS" == 0 ]; then
     prompt+="$ret_colour>$end "
