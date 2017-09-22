@@ -14,4 +14,4 @@ function link_file {
     fi
 }
 
-link_file prompt ~/.prompt
+link_file $(dirname "$BASH_SOURCE")/prompt ~/.prompt
