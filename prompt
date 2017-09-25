@@ -13,17 +13,6 @@
 RET_CODE="$2"
 
 #-------------------------------------------------------------------------------
-# Configuration
-#-------------------------------------------------------------------------------
-  GIT_STATUS_OPTS="--ignore-submodules"
-          TIMEOUT=${FANCY_PROMPT_TIMEOUT:-3}
-         TIMEOUT2=$((TIMEOUT*2))
-    DYNAMIC_WIDTH=${FANCY_PROMPT_DYNAMIC_WIDTH:-1}
-      USE_SYMBOLS=${FANCY_PROMP_USE_SYMBOLS:-1}
-      USE_SYMBOLS=${FANCY_PROMP_USE_SYMBOLS:-1}
-    FETCH_TIMEOUT=${FANCY_PROMP_FETCH_TIMEOUT:-1}
-
-#-------------------------------------------------------------------------------
 # Init
 #-------------------------------------------------------------------------------
 # Unalias all aliases
@@ -41,6 +30,10 @@ PORCELAIN_INFO=""
 #-------------------------------------------------------------------------------
 # Functions
 #-------------------------------------------------------------------------------
+var_enabled() {
+    [[ "$1" ]] && [[ $1 != 0 ]]
+}
+
 check_error() {
     RET_CODE="$1"
     CODE="$2"
@@ -144,9 +137,9 @@ set_git_info() {
     git_version=$(git --version | sed -E 's/git version ([0-9.]+)/\1/g')
 
     if vercomp "$git_version" "1.7.2"; then
-        info=$(timeout $TIMEOUT2 git status --untracked-files=normal --branch --porcelain $GIT_STATUS_OPTS)
+        info=$(timeout "$TIMEOUT2" git status --untracked-files=normal --branch --porcelain "$GIT_STATUS_OPTS")
     else
-        info=$(timeout $TIMEOUT2 git status --untracked-files=normal --porcelain)
+        info=$(timeout "$TIMEOUT2" git status --untracked-files=normal --porcelain)
     fi
 
     error=$(check_error "$?" "2")
@@ -196,8 +189,9 @@ set_git_info() {
                         error=$(check_error "$?" "6")
                     fi
 
-                    if [ "$USE_SYMBOLS" == 1 ]; then
+                    if var_enabled "$FANCY_PROMPT_USE_SYMBOLS"; then
                         symbol=""
+                        # symbol="" # NERD
                     fi
 
                     echo "$symbol$CHECKOUT"
@@ -275,31 +269,64 @@ get_scm_prompt() {
     echo "$src_ctrl"
 }
 
+remove_ansi_chars() {
+    local expanded
+    expanded=$(printf '%b' "$1")
+    sed "s/\x1B\[[0-9;]*[a-zA-Z]//g" <<< "$expanded"
+}
+
+lhs_rhs_prompt() {
+    local lhs=$1
+    local rhs=$2
+    local cols=$3
+
+    rhs_no_ansi=$(remove_ansi_chars "$rhs")
+
+    # Reference: https://en.wikipedia.org/wiki/ANSI_escape_code
+    save='\e[s' # Save cursor position
+    rest='\e[u' # Restore cursor to save point
+
+    echo "\[${save}\e[${cols}C\e[${#rhs_no_ansi}D${rhs}${rest}\]$lhs"
+}
+
+#-------------------------------------------------------------------------------
+# Configuration
+#-------------------------------------------------------------------------------
+GIT_STATUS_OPTS="--ignore-submodules"
+        TIMEOUT=${FANCY_PROMPT_TIMEOUT-3}
+       TIMEOUT2=$((TIMEOUT*2))
+  FETCH_TIMEOUT=${FANCY_PROMPT_FETCH_TIMEOUT-1}
+
+if var_enabled "$FANCY_PROMPT_USE_NERD_SYMBOLS"; then
+    FANCY_PROMPT_USE_SYMBOLS=1
+fi
+
 #-------------------------------------------------------------------------------
 # Attributes & Colours
 #-------------------------------------------------------------------------------
+
 if [ "$SHELL" == "bash" ]; then
-    c_start="\["
-      c_end="\]"
-       user="\u"
+    c_start=""
+      c_end=""
+       # user="\u"
         dir="\W"
        host="\H"
 else # csh, tcsh and zsh
     c_start="%{"
       c_end="%}"
-       user="%n"
+       # user="%n"
         dir="%c"
        host="%m"
 fi
 
-   reverse="${c_start}\e[3;35m${c_end}"
-underlined="${c_start}\e[4;35m${c_end}"
-       dim="${c_start}\e[10;35m${c_end}"
+   # reverse="${c_start}\e[3;35m${c_end}"
+# underlined="${c_start}\e[4;35m${c_end}"
+       # dim="${c_start}\e[10;35m${c_end}"
       gray="${c_start}\e[1;30m${c_end}"
        red="${c_start}\e[1;31m${c_end}"
      green="${c_start}\e[1;32m${c_end}"
     yellow="${c_start}\e[1;33m${c_end}"
-      blue="${c_start}\e[1;34m${c_end}"
+      # blue="${c_start}\e[1;34m${c_end}"
    magenta="${c_start}\e[1;35m${c_end}"
       cyan="${c_start}\e[1;36m${c_end}"
      white="${c_start}\e[1;37m${c_end}"
@@ -351,8 +378,8 @@ prompt=""
 cols=$(tput cols)
 
 # Adjust prompt according on terminal width.
-if [ "$cols" -gt 60 ] || [ "$DYNAMIC_WIDTH" == 0 ]; then
-    if [ "$cols" -gt 80 ] || [ "$DYNAMIC_WIDTH" == 0 ]; then
+if [ "$cols" -gt 60 ] || ! var_enabled "$FANCY_PROMPT_DYNAMIC_WIDTH"; then
+    if [ "$cols" -gt 80 ] || ! var_enabled "$FANCY_PROMPT_DYNAMIC_WIDTH"; then
         prompt+="$cyan"
         prompt+="$host:"
         # prompt+="$user:"
@@ -361,12 +388,20 @@ if [ "$cols" -gt 60 ] || [ "$DYNAMIC_WIDTH" == 0 ]; then
     prompt+="$dir"
 fi
 
-prompt+="$prompt_info"
-
-if [ "$USE_SYMBOLS" == 0 ]; then
-    prompt+="$ret_colour>$end "
+if var_enabled "$FANCY_PROMPT_USE_SYMBOLS"; then
+    if var_enabled "$FANCY_PROMPT_USE_NERD_SYMBOLS"; then
+        #  
+        prompt_end="$ret_colour❯$end "
+    else
+        prompt_end="$ret_colour▶$end "
+    fi
 else
-    prompt+="$ret_colour▶$end "
+    prompt_end="$ret_colour>$end "
 fi
 
-echo "$prompt"
+if var_enabled "$FANCY_PROMPT_RHS_ENABLE"; then
+    # TODO: This is buggy when using completion
+    lhs_rhs_prompt "$prompt$prompt_end" "$prompt_info" "$cols"
+else
+    echo "$prompt$prompt_info$prompt_end"
+fi
