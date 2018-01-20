@@ -306,8 +306,8 @@ fi
 #-------------------------------------------------------------------------------
 
 if [ "$SHELL" == "bash" ]; then
-    c_start=""
-      c_end=""
+    c_start="\["
+      c_end="\]"
        # user="\u"
         dir="\W"
        host="\H"
@@ -391,13 +391,15 @@ fi
 if var_enabled "$FANCY_PROMPT_USE_SYMBOLS"; then
     if var_enabled "$FANCY_PROMPT_USE_NERD_SYMBOLS"; then
         #  
-        prompt_end="$ret_colour❯$end "
+        arrow="❯"
     else
-        prompt_end="$ret_colour▶$end "
+        arrow="▶"
     fi
 else
-    prompt_end="$ret_colour>$end "
+    arrow=">"
 fi
+
+prompt_end="$ret_colour$arrow$end "
 
 if var_enabled "$FANCY_PROMPT_RHS_ENABLE"; then
     # TODO: This is buggy when using completion
