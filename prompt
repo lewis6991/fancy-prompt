@@ -17,6 +17,7 @@ RET_CODE="$2"
 #-------------------------------------------------------------------------------
 # Unalias all aliases
 unalias -a
+# STTY_CONFIG=$(stty -g)
 
 #-------------------------------------------------------------------------------
 # Globals
@@ -26,6 +27,7 @@ AHEAD=""
 BEHIND=""
 STASHES=""
 PORCELAIN_INFO=""
+LOCAL_BRANCHES=""
 
 #-------------------------------------------------------------------------------
 # Functions
@@ -198,6 +200,7 @@ set_git_info() {
                 }
 
                 STASHES=$(git stash list | wc -l)
+                LOCAL_BRANCHES=$(git branch -vv | cut -c 3- | awk '$3 !~/\[origin/ { print $1 }' | wc -l)
                 if vercomp "$git_version" "1.7.2"; then
                     CHECKOUT=$(get_git_checkout "$info")
                 else
@@ -238,6 +241,8 @@ set_svn_info() {
 get_scm_prompt() {
     local src_ctrl
     local staged=""
+    local tree_deleted=""
+    local index_deleted=""
     local unstaged=""
     local untracked="?"
     local conflicts=""
@@ -246,7 +251,9 @@ get_scm_prompt() {
 
     if [ "$error" == "" ]; then
         if [ "$PORCELAIN_INFO" != "?" ]; then
-            staged=$(echo "$PORCELAIN_INFO" | grep -c "^ *A\|^M\|^D\|^R")
+            staged=$(echo "$PORCELAIN_INFO" | grep -c "^ *A\|^M\|^R")
+            tree_deleted=$(echo "$PORCELAIN_INFO" | grep -c "^ \+D")
+            index_deleted=$(echo "$PORCELAIN_INFO" | grep -c "^D")
             unstaged=$(echo "$PORCELAIN_INFO" | grep -c "^ \+M\|UU")
             untracked=$(echo "$PORCELAIN_INFO" | grep -c "^ *?")
             conflicts=$(echo "$PORCELAIN_INFO" | grep -c "^MM")
@@ -257,10 +264,13 @@ get_scm_prompt() {
         src_ctrl+="$(format_value "$AHEAD" "↑")"
         src_ctrl+="$(format_value "$BEHIND" "↓")"
         src_ctrl+="$green$(format_value "$staged" "●")"
+        src_ctrl+="$green$(format_value "$index_deleted" "-")"
         src_ctrl+="$red$(format_value "$conflicts" "✖")"
         src_ctrl+="$red$(format_value "$unstaged" "✚")"
+        src_ctrl+="$red$(format_value "$tree_deleted" "-")"
         src_ctrl+="$magenta$(format_value "$untracked" "…")"
         src_ctrl+="$yellow$(format_value "$STASHES" "⚑")"
+        src_ctrl+="$yellow$(format_value "$LOCAL_BRANCHES" "!")"
     else
         src_ctrl+="$red$error"
     fi
@@ -407,3 +417,4 @@ if var_enabled "$FANCY_PROMPT_RHS_ENABLE"; then
 else
     echo "$prompt$prompt_info$prompt_end"
 fi
+# stty $STTY_CONFIG
