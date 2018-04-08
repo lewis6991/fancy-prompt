@@ -3,12 +3,23 @@
 * Provides a nice colourful prompt.
 * Gives you basic information about your git or svn checkout.
 * Supports bash, csh and tcsh.
+* Asynchronous! (zsh only)
 
 # Screenshot
 
 ![img](screen.png)
 
 # Installation
+
+### Zsh
+
+Requires mafredri/zsh-async.
+
+Add the following to your `.zshrc`:
+```zsh
+source path/to/fancy_prompt/prompt.zsh
+
+```
 
 ### Bash
 

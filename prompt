@@ -11,6 +11,7 @@
 #-------------------------------------------------------------------------------
    SHELL="$1"
 RET_CODE="$2"
+  NO_SCM="${3:-0}"
 
 #-------------------------------------------------------------------------------
 # Init
@@ -28,6 +29,17 @@ BEHIND=""
 STASHES=""
 PORCELAIN_INFO=""
 LOCAL_BRANCHES=""
+
+#-------------------------------------------------------------------------------
+# Configuration
+#-------------------------------------------------------------------------------
+# FANCY_PROMPT_DOUBLE_LINE
+# FANCY_PROMPT_DYNAMIC_WIDTH
+# FANCY_PROMPT_FETCH_TIMEOUT
+# FANCY_PROMPT_RHS_ENABLE
+# FANCY_PROMPT_TIMEOUT
+# FANCY_PROMPT_USE_NERD_SYMBOLS
+# FANCY_PROMPT_USE_SYMBOLS
 
 #-------------------------------------------------------------------------------
 # Functions
@@ -48,15 +60,6 @@ check_error() {
 in_git() {
     git rev-parse 2> /dev/null
     return $?
-}
-
-in_git_svn() {
-    return 1
-    if [ -d "$(git rev-parse --show-toplevel)/.git/svn" ]; then
-        return 1
-    else
-        return 0
-    fi
 }
 
 in_svn() {
@@ -90,7 +93,7 @@ format_value() {
     fi
 }
 
-vercomp () {
+vercomp() {
     if [[ "$1" == "$2" ]]; then
         return 0
     fi
@@ -149,63 +152,45 @@ set_git_info() {
     PORCELAIN_INFO="$info"
 
     if [ "$error" == "" ]; then
-        if in_git_svn; then
-            local local_rev
-            local remote_rev
+         AHEAD=$(echo "$info" | grep 'ahead'  | sed -E  's/.*ahead[[:space:]]+([0-9]+).*/\1/g')
+        BEHIND=$(echo "$info" | grep 'behind' | sed -E 's/.*behind[[:space:]]+([0-9]+).*/\1/g')
+        error=$(check_error "$?" "4")
 
-            local_rev=$(git svn find-rev HEAD)
-            remote_rev=$(git svn find-rev git-svn)
+        if [ "$error" == "" ]; then
+            get_git_checkout() {
+                local info
+                local symbol=""
 
-            if [[ $remote_rev =~ ^[0-9]+$ ]]; then
-                BEHIND=$((remote_rev - local_rev))
-            else
-                error=$(check_error "1" "9")
-            fi
+                info="$1"
 
-            if [ "$error" == "" ]; then
-                CHECKOUT="r$local_rev"
-                git svn fetch &
-            fi
-        else
-            AHEAD=$(echo "$info" | grep 'ahead'  | sed -E  's/.*ahead[[:space:]]+([0-9]+).*/\1/g')
-            BEHIND=$(echo "$info" | grep 'behind' | sed -E 's/.*behind[[:space:]]+([0-9]+).*/\1/g')
-            error=$(check_error "$?" "4")
+                CHECKOUT=$(\
+                    echo "$info" | \
+                    sed 's/\.\.\..*//g' | \
+                    sed -E 's/##[[:space:]]+//g' | \
+                    sed -n '1 p')
+                error=$(check_error "$?" "5")
 
-            if [ "$error" == "" ]; then
-                get_git_checkout() {
-                    local info
-                    local symbol=""
-
-                    info="$1"
-
-                    CHECKOUT=$(\
-                        echo "$info" | \
-                        sed 's/\.\.\..*//g' | \
-                        sed -E 's/##[[:space:]]+//g' | \
-                        sed -n '1 p')
-                    error=$(check_error "$?" "5")
-
-                    if [[ "$CHECKOUT" =~ "HEAD" ]]; then
-                        # Show short hash if not on a branch
-                        CHECKOUT=$(git rev-parse --short HEAD)
-                        error=$(check_error "$?" "6")
-                    fi
-
-                    if var_enabled "$FANCY_PROMPT_USE_SYMBOLS"; then
-                        symbol=""
-                        # symbol="" # NERD
-                    fi
-
-                    echo "$symbol$CHECKOUT"
-                }
-
-                STASHES=$(git stash list | wc -l)
-                LOCAL_BRANCHES=$(git branch -vv | cut -c 3- | awk '$3 !~/\[origin/ { print $1 }' | wc -l)
-                if vercomp "$git_version" "1.7.2"; then
-                    CHECKOUT=$(get_git_checkout "$info")
-                else
-                    CHECKOUT=$(git rev-parse --abbrev-ref HEAD)
+                if [[ "$CHECKOUT" =~ "HEAD" ]]; then
+                    # Show short hash if not on a branch
+                    CHECKOUT=$(git rev-parse --short HEAD)
+                    error=$(check_error "$?" "6")
                 fi
+
+                if var_enabled "$FANCY_PROMPT_USE_NERD_SYMBOLS"; then
+                    symbol=""
+                elif var_enabled "$FANCY_PROMPT_USE_SYMBOLS"; then
+                    symbol=""
+                fi
+
+                echo "$symbol$CHECKOUT"
+            }
+
+            STASHES=$(git stash list | wc -l)
+            LOCAL_BRANCHES=$(git branch -vv | cut -c 3- | awk '$3 !~/\[origin/ { print $1 }' | wc -l)
+            if vercomp "$git_version" "1.7.2"; then
+                CHECKOUT=$(get_git_checkout "$info")
+            else
+                CHECKOUT=$(git rev-parse --abbrev-ref HEAD)
             fi
         fi
     fi
@@ -318,13 +303,13 @@ fi
 if [ "$SHELL" == "bash" ]; then
     c_start="\["
       c_end="\]"
-       # user="\u"
+       user="\u"
         dir="\W"
        host="\H"
 else # csh, tcsh and zsh
     c_start="%{"
       c_end="%}"
-       # user="%n"
+       user="%n"
         dir="%c"
        host="%m"
 fi
@@ -336,7 +321,7 @@ fi
        red="${c_start}\e[1;31m${c_end}"
      green="${c_start}\e[1;32m${c_end}"
     yellow="${c_start}\e[1;33m${c_end}"
-      # blue="${c_start}\e[1;34m${c_end}"
+      blue="${c_start}\e[1;34m${c_end}"
    magenta="${c_start}\e[1;35m${c_end}"
       cyan="${c_start}\e[1;36m${c_end}"
      white="${c_start}\e[1;37m${c_end}"
@@ -354,15 +339,6 @@ fi
 src_ctl_colour="$gray"
 
 #-------------------------------------------------------------------------------
-# Return Code
-#-------------------------------------------------------------------------------
-if [ "$RET_CODE" == 0 ]; then
-    ret_colour="$cyan"
-else
-    ret_colour="$red"
-fi
-
-#-------------------------------------------------------------------------------
 # Source Control
 #-------------------------------------------------------------------------------
 
@@ -372,12 +348,14 @@ if pwd | grep -q "\.git"; then
     cd "$(pwd | sed 's/\.git\(\/.*\)\?//g')" || exit
 fi
 
-if in_git; then
-    set_git_info
-    prompt_info=$(get_scm_prompt)
-elif in_svn; then
-    set_svn_info
-    prompt_info=$(get_scm_prompt)
+if (( $NO_SCM == 0 )); then
+    if in_git; then
+        set_git_info
+        prompt_info=$(get_scm_prompt)
+    elif in_svn; then
+        set_svn_info
+        prompt_info=$(get_scm_prompt)
+    fi
 fi
 
 #-------------------------------------------------------------------------------
@@ -390,9 +368,10 @@ cols=$(tput cols)
 # Adjust prompt according on terminal width.
 if [ "$cols" -gt 60 ] || ! var_enabled "$FANCY_PROMPT_DYNAMIC_WIDTH"; then
     if [ "$cols" -gt 80 ] || ! var_enabled "$FANCY_PROMPT_DYNAMIC_WIDTH"; then
-        prompt+="$cyan"
+        prompt+="$blue"
         prompt+="$host:"
-        # prompt+="$user:"
+        prompt+="$cyan"
+        prompt+="$user:"
     fi
     prompt+="$dir_colour"
     prompt+="$dir"
@@ -409,9 +388,17 @@ else
     arrow=">"
 fi
 
+if [ "$RET_CODE" == 0 ]; then
+    ret_colour="$cyan"
+else
+    ret_colour="$red"
+fi
+
 prompt_end="$ret_colour$arrow$end "
 
-if var_enabled "$FANCY_PROMPT_RHS_ENABLE"; then
+if var_enabled "$FANCY_PROMPT_DOUBLE_LINE"; then
+    echo "\n$prompt$prompt_info\n$prompt_end"
+elif var_enabled "$FANCY_PROMPT_RHS_ENABLE"; then
     # TODO: This is buggy when using completion
     lhs_rhs_prompt "$prompt$prompt_end" "$prompt_info" "$cols"
 else
