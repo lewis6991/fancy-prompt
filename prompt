@@ -2,8 +2,8 @@
 #-------------------------------------------------------------------------------
 # File        : .prompt
 # Author      : Lewis Russell
-# Description : Very useful csh/tcsh/bash prompt for seamless use with Git and
-#               SVN.
+# Description : Very useful zsh/csh/tcsh/bash prompt for seamless use with Git
+#               and SVN.
 #-------------------------------------------------------------------------------
 
 #-------------------------------------------------------------------------------
@@ -18,7 +18,6 @@ RET_CODE="$2"
 #-------------------------------------------------------------------------------
 # Unalias all aliases
 unalias -a
-# STTY_CONFIG=$(stty -g)
 
 #-------------------------------------------------------------------------------
 # Globals
@@ -94,11 +93,18 @@ format_value() {
 }
 
 vercomp() {
+    local IFS=.
+    local i
+
+    # shellcheck disable=SC2206
+    local ver1=($1)
+    # shellcheck disable=SC2206
+    local ver2=($2)
+
     if [[ "$1" == "$2" ]]; then
         return 0
     fi
-    local IFS=.
-    local i ver1=($1) ver2=($2)
+
     # fill empty fields in ver1 with zeros
     for ((i=${#ver1[@]}; i<${#ver2[@]}; i++)); do
         ver1[i]=0
@@ -117,11 +123,8 @@ vercomp() {
 
 git_bg_fetch() {
     if [[ -n $(git remote show) ]]; then
-        local repo
-        local fetch_head
-
-        repo=$(git rev-parse --show-toplevel 2> /dev/null)
-        fetch_head="$repo/.git/FETCH_HEAD"
+        local repo; repo=$(git rev-parse --show-toplevel 2> /dev/null)
+        local fetch_head="$repo/.git/FETCH_HEAD"
 
         if [[ -e "$fetch_head" ]]; then
             local old_head
@@ -135,9 +138,51 @@ git_bg_fetch() {
     fi
 }
 
+get_git_checkout() {
+    local checkout
+    local error
+    local info="$1"
+    local remote_abbr
+    local remote_full
+    local symbol=""
+
+    checkout=$(\
+        echo "$info" | \
+        sed 's/\.\.\..*//g' | \
+        sed -E 's/##[[:space:]]+//g' | \
+        sed -n '1 p')
+
+    error=$(check_error "$?" "5")
+
+    if [[ "$CHECKOUT" =~ "HEAD" ]]; then
+        # Show short hash if not on a branch
+        checkout=$(git rev-parse --short HEAD)
+        error=$(check_error "$?" "6")
+    fi
+
+    remote_full=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}')
+
+    remote_abbr=$(\
+        echo "$remote_full" | \
+        sed 's/^origin\///g' | \
+        sed "s/$checkout$//g" )
+
+    if var_enabled "$FANCY_PROMPT_USE_NERD_SYMBOLS"; then
+        symbol=""
+    elif var_enabled "$FANCY_PROMPT_USE_SYMBOLS"; then
+        symbol=""
+    fi
+
+    printf "%s" "$symbol$checkout"
+    if ! [ -z "$remote_abbr" ]; then
+        printf "%s" "->$remote_abbr"
+    fi
+}
+
 set_git_info() {
-    local git_version
     local info
+    local git_version
+    local error
 
     git_version=$(git --version | sed -E 's/git version ([0-9.]+)/\1/g')
 
@@ -152,45 +197,17 @@ set_git_info() {
     PORCELAIN_INFO="$info"
 
     if [ "$error" == "" ]; then
-         AHEAD=$(echo "$info" | grep 'ahead'  | sed -E  's/.*ahead[[:space:]]+([0-9]+).*/\1/g')
-        BEHIND=$(echo "$info" | grep 'behind' | sed -E 's/.*behind[[:space:]]+([0-9]+).*/\1/g')
+         AHEAD=$(grep 'ahead'  <<< "$info" | sed -E  's/.*ahead[[:space:]]+([0-9]+).*/\1/g')
+        BEHIND=$(grep 'behind' <<< "$info" | sed -E 's/.*behind[[:space:]]+([0-9]+).*/\1/g')
         error=$(check_error "$?" "4")
 
         if [ "$error" == "" ]; then
-            get_git_checkout() {
-                local info
-                local symbol=""
-
-                info="$1"
-
-                CHECKOUT=$(\
-                    echo "$info" | \
-                    sed 's/\.\.\..*//g' | \
-                    sed -E 's/##[[:space:]]+//g' | \
-                    sed -n '1 p')
-                error=$(check_error "$?" "5")
-
-                if [[ "$CHECKOUT" =~ "HEAD" ]]; then
-                    # Show short hash if not on a branch
-                    CHECKOUT=$(git rev-parse --short HEAD)
-                    error=$(check_error "$?" "6")
-                fi
-
-                if var_enabled "$FANCY_PROMPT_USE_NERD_SYMBOLS"; then
-                    symbol=""
-                elif var_enabled "$FANCY_PROMPT_USE_SYMBOLS"; then
-                    symbol=""
-                fi
-
-                echo "$symbol$CHECKOUT"
-            }
-
             STASHES=$(git stash list | wc -l)
             LOCAL_BRANCHES=$(git branch -vv | cut -c 3- | awk '$3 !~/\[origin/ { print $1 }' | wc -l)
             if vercomp "$git_version" "1.7.2"; then
                 CHECKOUT=$(get_git_checkout "$info")
             else
-                CHECKOUT=$(git rev-parse --abbrev-ref HEAD)
+                CHECKOUT="!$(git rev-parse --abbrev-ref HEAD)"
             fi
         fi
     fi
@@ -200,8 +217,11 @@ set_git_info() {
 
 set_svn_info() {
     local info
+    local error
+
     info=$(timeout "$TIMEOUT" svn info)
     error=$(check_error "$?" "7")
+
     if [ "$error" == "" ]; then
         local local_rev
         local remote_rev
@@ -224,7 +244,7 @@ set_svn_info() {
 }
 
 get_scm_prompt() {
-    local src_ctrl
+    local src_ctrl=""
     local staged=""
     local tree_deleted=""
     local index_deleted=""
@@ -232,16 +252,14 @@ get_scm_prompt() {
     local untracked="?"
     local conflicts=""
 
-    src_ctrl="$src_ctl_colour["
-
     if [ "$error" == "" ]; then
         if [ "$PORCELAIN_INFO" != "?" ]; then
-            staged=$(echo "$PORCELAIN_INFO" | grep -c "^ *A\|^M\|^R")
-            tree_deleted=$(echo "$PORCELAIN_INFO" | grep -c "^ \+D")
-            index_deleted=$(echo "$PORCELAIN_INFO" | grep -c "^D")
-            unstaged=$(echo "$PORCELAIN_INFO" | grep -c "^ \+M\|UU")
-            untracked=$(echo "$PORCELAIN_INFO" | grep -c "^ *?")
-            conflicts=$(echo "$PORCELAIN_INFO" | grep -c "^MM")
+                   staged=$(grep -c '^ *A\|^M\|^R' <<< "$PORCELAIN_INFO")
+             tree_deleted=$(grep -c '^ \+D'        <<< "$PORCELAIN_INFO")
+            index_deleted=$(grep -c '^D'           <<< "$PORCELAIN_INFO")
+                 unstaged=$(grep -c '^ \+M\|UU'    <<< "$PORCELAIN_INFO")
+                untracked=$(grep -c '^ *?'         <<< "$PORCELAIN_INFO")
+                conflicts=$(grep -c '^MM'          <<< "$PORCELAIN_INFO")
         fi
 
         src_ctrl+="$CHECKOUT"
@@ -259,29 +277,29 @@ get_scm_prompt() {
     else
         src_ctrl+="$red$error"
     fi
-    src_ctrl+="$src_ctl_colour]"
 
-    echo "$src_ctrl"
+    printf "%s" "$src_ctl_colour[$src_ctrl$src_ctl_colour]"
 }
 
-remove_ansi_chars() {
-    local expanded
-    expanded=$(printf '%b' "$1")
-    sed "s/\x1B\[[0-9;]*[a-zA-Z]//g" <<< "$expanded"
+remove_invisible_chars() {
+    printf '%b' "$1" | sed 's/\\[\x1B\[[0-9;]*[a-zA-Z]\\]//g'
 }
 
 lhs_rhs_prompt() {
     local lhs=$1
     local rhs=$2
     local cols=$3
-
-    rhs_no_ansi=$(remove_ansi_chars "$rhs")
+    local rhs_no_non_printable
+    local rhs_length
 
     # Reference: https://en.wikipedia.org/wiki/ANSI_escape_code
-    save='\e[s' # Save cursor position
-    rest='\e[u' # Restore cursor to save point
+    local save='\e[s' # Save cursor position
+    local restore='\e[u' # Restore cursor to save point
 
-    echo "\[${save}\e[${cols}C\e[${#rhs_no_ansi}D${rhs}${rest}\]$lhs"
+    rhs_no_non_printable=$(remove_invisible_chars "$rhs")
+    rhs_length=${#rhs_no_non_printable}
+
+    printf "%s" "\\[${save}\\e[${cols}C\\e[${rhs_length}D${rhs}${restore}\\]${lhs}"
 }
 
 #-------------------------------------------------------------------------------
@@ -301,31 +319,31 @@ fi
 #-------------------------------------------------------------------------------
 
 if [ "$SHELL" == "bash" ]; then
-    c_start="\["
-      c_end="\]"
-       user="\u"
-        dir="\W"
-       host="\H"
+    c_start='\['
+      c_end='\]'
+       user='\u'
+        dir='\W'
+       host='\H'
 else # csh, tcsh and zsh
-    c_start="%{"
-      c_end="%}"
-       user="%n"
-        dir="%c"
-       host="%m"
+    c_start='%{'
+      c_end='%}'
+       user='%n'
+        dir='%c'
+       host='%m'
 fi
 
-   # reverse="${c_start}\e[3;35m${c_end}"
-# underlined="${c_start}\e[4;35m${c_end}"
-       # dim="${c_start}\e[10;35m${c_end}"
-      gray="${c_start}\e[1;30m${c_end}"
-       red="${c_start}\e[1;31m${c_end}"
-     green="${c_start}\e[1;32m${c_end}"
-    yellow="${c_start}\e[1;33m${c_end}"
-      blue="${c_start}\e[1;34m${c_end}"
-   magenta="${c_start}\e[1;35m${c_end}"
-      cyan="${c_start}\e[1;36m${c_end}"
-     white="${c_start}\e[1;37m${c_end}"
-       end="${c_start}\e[0m${c_end}" # This is needed at the end.
+   # reverse="${c_start}\\e[3;35m${c_end}"
+# underlined="${c_start}\\e[4;35m${c_end}"
+       # dim="${c_start}\\e[10;35m${c_end}"
+      gray="$c_start\\e[1;30m$c_end"
+       red="$c_start\\e[1;31m$c_end"
+     green="$c_start\\e[1;32m$c_end"
+    yellow="$c_start\\e[1;33m$c_end"
+      blue="$c_start\\e[1;34m$c_end"
+   magenta="$c_start\\e[1;35m$c_end"
+      cyan="$c_start\\e[1;36m$c_end"
+     white="$c_start\\e[1;37m$c_end"
+       end="$c_start\\e[0m$c_end" # This is needed at the end.
 
 # Use a different colour for each shell.
 if [ "$SHELL" == "bash" ]; then
@@ -344,11 +362,11 @@ src_ctl_colour="$gray"
 
 # If we a located somewhere deep in .git/.. then navigate out of it to prevent
 # the error: "fatal: This operation must be run in a work tree"
-if pwd | grep -q "\.git"; then
+if pwd | grep -q "\\.git"; then
     cd "$(pwd | sed 's/\.git\(\/.*\)\?//g')" || exit
 fi
 
-if (( $NO_SCM == 0 )); then
+if ((NO_SCM == 0)); then
     if in_git; then
         set_git_info
         prompt_info=$(get_scm_prompt)
@@ -397,11 +415,11 @@ fi
 prompt_end="$ret_colour$arrow$end "
 
 if var_enabled "$FANCY_PROMPT_DOUBLE_LINE"; then
-    echo "\n$prompt$prompt_info\n$prompt_end"
+    printf "%s" "\\n$prompt$prompt_info\\n$prompt_end"
 elif var_enabled "$FANCY_PROMPT_RHS_ENABLE"; then
     # TODO: This is buggy when using completion
+    # TODO: Does not work for zsh
     lhs_rhs_prompt "$prompt$prompt_end" "$prompt_info" "$cols"
 else
-    echo "$prompt$prompt_info$prompt_end"
+    printf "%s" "$prompt$prompt_info$prompt_end"
 fi
-# stty $STTY_CONFIG
