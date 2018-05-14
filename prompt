@@ -154,7 +154,7 @@ get_git_checkout() {
 
     error=$(check_error "$?" "5")
 
-    if [[ "$CHECKOUT" =~ "HEAD" ]]; then
+    if [[ "$checkout" =~ HEAD ]]; then
         # Show short hash if not on a branch
         checkout=$(git rev-parse --short HEAD)
         error=$(check_error "$?" "6")
