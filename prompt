@@ -158,6 +158,11 @@ get_git_checkout() {
         # Show short hash if not on a branch
         checkout=$(git rev-parse --short HEAD)
         error=$(check_error "$?" "6")
+
+        # Are we rebasing
+        if ls "$(git rev-parse --git-dir)"/rebase* > /dev/null 2>&1; then
+            checkout="$checkout(rebasing)"
+        fi
     fi
 
     remote_full=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}')
