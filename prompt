@@ -233,12 +233,6 @@ set_svn_info() {
 }
 
 get_scm_prompt() {
-    if in_git; then
-        set_git_info
-    elif in_svn; then
-        set_svn_info
-    fi
-
     local src_ctrl=""
     local staged=""
     local tree_deleted=""
@@ -298,7 +292,7 @@ get_scm_prompt() {
             fi
         }
 
-        src_ctrl+="$co_sym$CHECKOUT"
+        src_ctrl+=$(build_section ""   "$co_sym" "$CHECKOUT"      )
         src_ctrl+=$(build_section "$white"   '↑' "$AHEAD"         )
         src_ctrl+=$(build_section "$white"   '↓' "$BEHIND"        )
         src_ctrl+=$(build_section "$green"   '●' "$staged"        )
@@ -416,10 +410,15 @@ if pwd | grep -q "\\.git"; then
     cd "$(pwd | sed -E 's/\.git(\/.*)?//g')" || exit
 fi
 
+prompt_info=""
 if ((NO_SCM == 0)); then
-    prompt_info=$(get_scm_prompt)
-else
-    prompt_info=""
+    if in_git; then
+        set_git_info
+        prompt_info=$(get_scm_prompt)
+    elif in_svn; then
+        set_svn_info
+        prompt_info=$(get_scm_prompt)
+    fi
 fi
 
 #-------------------------------------------------------------------------------
