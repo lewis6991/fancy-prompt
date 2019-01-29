@@ -192,7 +192,8 @@ set_git_info() {
 
         if [ "$error" == "" ]; then
             STASHES=$(git stash list | wc -l)
-            LOCAL_BRANCHES=$(git branch -vv | cut -c 3- | awk '$3 !~/\[origin/ { print $1 }' | wc -l)
+            # LOCAL_BRANCHES=$(git branch -vv | cut -c 3- | awk '$3 !~/\[origin/ { print $1 }' | wc -l)
+            LOCAL_BRANCHES=$(git branch | cut -c 3- | grep -v master | wc -l)
             if vercomp "$git_version" "1.7.2"; then
                 CHECKOUT=$(get_git_checkout "$info")
             else
@@ -201,7 +202,7 @@ set_git_info() {
         fi
     fi
 
-    git_bg_fetch &
+    # git_bg_fetch &
 }
 
 set_svn_info() {
@@ -251,29 +252,24 @@ get_scm_prompt() {
             local unstaged=0
             local untracked=0
             local conflicts=0
-            local unknown=0
+
 
             local IFS=$'\n'
             for line in $PORCELAIN_INFO; do
-                if   [[ $line =~ ^##          ]]; then true
-                elif [[ $line =~ ^[MRC][\ MD] ]]; then ((staged        ++))
-                elif [[ $line =~ ^A[\ MD]     ]]; then ((index_added   ++))
-                elif [[ $line =~ ^D\          ]]; then ((index_deleted ++))
-                elif [[ $line =~ ^[\ MARC]D   ]]; then ((tree_deleted  ++))
-                elif [[ $line =~ ^[\ MARC]M   ]]; then ((unstaged      ++))
-                elif [[ $line =~ ^\?\?        ]]; then ((untracked     ++))
-                elif [[ $line =~ ^(DD|AU|UD|UA|DU|AA|UU) ]]; then
-                    # DD  unmerged, both deleted
-                    # AU  unmerged, added by us
-                    # UD  unmerged, deleted by them
-                    # UA  unmerged, added by them
-                    # DU  unmerged, deleted by us
-                    # AA  unmerged, both added
-                    # UU  unmerged, both modified
-                    ((conflicts++))
-                else
-                    ((unknown++))
-                fi
+                if [[ $line =~ ^[MRC][\ MD]            ]]; then ((staged        ++)); fi
+                if [[ $line =~ ^A[\ MD]                ]]; then ((index_added   ++)); fi
+                if [[ $line =~ ^D\                     ]]; then ((index_deleted ++)); fi
+                if [[ $line =~ ^[\ MARC]D              ]]; then ((tree_deleted  ++)); fi
+                if [[ $line =~ ^[\ MARC]M              ]]; then ((unstaged      ++)); fi
+                if [[ $line =~ ^\?\?                   ]]; then ((untracked     ++)); fi
+                if [[ $line =~ ^(DD|AU|UD|UA|DU|AA|UU) ]]; then ((conflicts     ++)); fi
+                # DD  unmerged, both deleted
+                # AU  unmerged, added by us
+                # UD  unmerged, deleted by them
+                # UA  unmerged, added by them
+                # DU  unmerged, deleted by us
+                # AA  unmerged, both added
+                # UU  unmerged, both modified
             done
         fi
 
@@ -304,7 +300,6 @@ get_scm_prompt() {
         src_ctrl+=$(build_section "$magenta" '…' "$untracked"     )
         src_ctrl+=$(build_section "$yellow"  '⚑' "$STASHES"       )
         src_ctrl+=$(build_section "$yellow"  '!' "$LOCAL_BRANCHES")
-        src_ctrl+=$(build_section "$magenta" '?' "$unknown"       )
     else
         src_ctrl+="$red$error"
     fi
@@ -367,14 +362,24 @@ if [ "$SHELL" == "bash" ]; then
     c_start='\['
       c_end='\]'
        user='\u'
-        dir='\W'
        host='\H'
+    if in_git; then
+        dir=$(basename $(git rev-parse --show-toplevel))/$(git rev-parse --show-prefix)
+        dir=${dir%?}  # Remove last /
+    else
+        dir='\W'
+    fi
 else # csh, tcsh and zsh
     c_start='%{'
       c_end='%}'
        user='%n'
-        dir='%c'
        host='%m'
+    if in_git; then
+        dir=$(basename $(git rev-parse --show-toplevel))/$(git rev-parse --show-prefix)
+        dir=${dir%?}  # Remove last /
+    else
+        dir='%c'
+    fi
 fi
 
    # reverse="${c_start}\\e[3;35m${c_end}"
