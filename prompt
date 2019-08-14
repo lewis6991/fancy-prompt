@@ -34,10 +34,18 @@ LOCAL_BRANCHES=""
 # Configuration
 #-------------------------------------------------------------------------------
 # FANCY_PROMPT_DOUBLE_LINE
+
 # FANCY_PROMPT_FETCH_TIMEOUT
+
 # FANCY_PROMPT_RHS_ENABLE
+
 # FANCY_PROMPT_TIMEOUT
+
 # FANCY_PROMPT_USE_NERD_SYMBOLS
+#     NOTE: this is a multi-char symbol which causes glitches with zsh tab
+#     completion. e.g. vim <tab> if locale is not setup correctly.
+#     export LC_CTYPE=en_US.UTF-8
+
 # FANCY_PROMPT_USE_SYMBOLS
 
 #-------------------------------------------------------------------------------
@@ -57,8 +65,7 @@ check_error() {
 }
 
 in_git() {
-    git rev-parse 2> /dev/null
-    return $?
+    [[ $(git rev-parse --is-inside-work-tree 2> /dev/null) == "true" ]]
 }
 
 in_svn() {
@@ -86,14 +93,14 @@ vercomp() {
     local IFS=.
     local i
 
+    if [[ "$1" == "$2" ]]; then
+        return 0
+    fi
+
     # shellcheck disable=SC2206
     local ver1=($1)
     # shellcheck disable=SC2206
     local ver2=($2)
-
-    if [[ "$1" == "$2" ]]; then
-        return 0
-    fi
 
     # fill empty fields in ver1 with zeros
     for ((i=${#ver1[@]}; i<${#ver2[@]}; i++)); do
@@ -104,8 +111,10 @@ vercomp() {
             # fill empty fields in ver2 with zeros
             ver2[i]=0
         fi
-        if ((10#${ver1[i]} > 10#${ver2[i]})); then
+        if ((ver1[i] > ver2[i])); then
             return 0
+        elif ((ver1[i] < ver2[i])); then
+            return 1
         fi
     done
     return 1
@@ -129,51 +138,33 @@ git_bg_fetch() {
 }
 
 get_git_checkout() {
-    local checkout
-    local error
-    local info="$1"
-    local remote_abbr
-    local remote_full
-    local symbol=""
-
-    checkout=$(\
-        echo "$info" | \
-        sed 's/\.\.\..*//g' | \
-        sed -E 's/##[[:space:]]+//g' | \
-        sed -n '1 p')
-
-    error=$(check_error "$?" "5")
+    local rp=($(git rev-parse --abbrev-ref HEAD --git-dir '@{u}'))
+    local checkout="${rp[0]}"
+    local git_dir="${rp[1]}"
+    local remote_full="${rp[2]}"
+    local remote_abbr="${remote_full#*/}"
 
     if [[ "$checkout" =~ HEAD ]]; then
         # Show short hash if not on a branch
         checkout=$(git rev-parse --short HEAD)
-        error=$(check_error "$?" "6")
 
         # Are we rebasing?
-        if ls "$(git rev-parse --git-dir)"/rebase* > /dev/null 2>&1; then
+        if ls "$git_dir"/rebase* > /dev/null 2>&1; then
             checkout="$checkout(rebasing)"
         fi
     fi
 
-    remote_full=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}')
-
-    remote_abbr=$(\
-        echo "$remote_full" | \
-        sed 's/^origin\///g' | \
-        sed "s/$checkout$//g" )
-
     printf "%s" "$checkout"
-    if ! [ -z "$remote_abbr" ]; then
+    if [ "$checkout" != "$remote_abbr" ] && [ ! -z "$remote_abbr" ]; then
         printf "%s" "->$remote_abbr"
     fi
 }
 
 set_git_info() {
     local info
-    local git_version
     local error
 
-    git_version=$(git --version | sed -E 's/git version ([0-9.]+)/\1/g')
+    local git_version=$(git --version | sed -E 's/git version ([0-9.]+)/\1/g')
 
     if vercomp "$git_version" "1.7.2"; then
         info=$(timeout "$TIMEOUT2" git status --untracked-files=normal --branch --porcelain "$GIT_STATUS_OPTS")
@@ -186,23 +177,32 @@ set_git_info() {
     PORCELAIN_INFO="$info"
 
     if [ "$error" == "" ]; then
-         AHEAD=$(grep 'ahead'  <<< "$info" | sed -E  's/.*ahead[[:space:]]+([0-9]+).*/\1/g')
-        BEHIND=$(grep 'behind' <<< "$info" | sed -E 's/.*behind[[:space:]]+([0-9]+).*/\1/g')
+        branch_info=$(head -1 <<< "$info")
+         AHEAD=$(grep 'ahead'  <<< "$branch_info" | sed -E  's/.*ahead ([0-9]+).*/\1/g')
+        BEHIND=$(grep 'behind' <<< "$branch_info" | sed -E 's/.*behind ([0-9]+).*/\1/g')
         error=$(check_error "$?" "4")
 
         if [ "$error" == "" ]; then
             STASHES=$(git stash list | wc -l)
             # LOCAL_BRANCHES=$(git branch -vv | cut -c 3- | awk '$3 !~/\[origin/ { print $1 }' | wc -l)
-            LOCAL_BRANCHES=$(git branch | cut -c 3- | grep -v master | wc -l)
+            # LOCAL_BRANCHES=$(git branch | cut -c 3- | grep -v master | wc -l)
+
+            # Local branches that do not have an upstream of the same name
+            if vercomp "$git_version" "2.0.0"; then
+                LOCAL_BRANCHES=$(git branch -vv --format='%(refname:strip=2)#%(upstream:strip=3)' | grep -vcE '([^#]+)#\1')
+            else
+                LOCAL_BRANCHES=$(git branch | cut -c 3- | grep -v master | wc -l)
+            fi
+
             if vercomp "$git_version" "1.7.2"; then
-                CHECKOUT=$(get_git_checkout "$info")
+                CHECKOUT=$(get_git_checkout)
             else
                 CHECKOUT="!$(git rev-parse --abbrev-ref HEAD)"
             fi
         fi
     fi
 
-    # git_bg_fetch &
+    # git_bg_fetch
 }
 
 set_svn_info() {
@@ -386,13 +386,13 @@ fi
 # underlined="${c_start}\\e[4;35m${c_end}"
        # dim="${c_start}\\e[10;35m${c_end}"
       gray="$c_start\\e[1;30m$c_end"
-       red="$c_start\\e[1;31m$c_end"
-     green="$c_start\\e[1;32m$c_end"
-    yellow="$c_start\\e[1;33m$c_end"
-      blue="$c_start\\e[1;34m$c_end"
-   magenta="$c_start\\e[1;35m$c_end"
-      cyan="$c_start\\e[1;36m$c_end"
-     white="$c_start\\e[1;37m$c_end"
+       red="$c_start\\e[0;31m$c_end"
+     green="$c_start\\e[0;32m$c_end"
+    yellow="$c_start\\e[0;33m$c_end"
+      blue="$c_start\\e[0;34m$c_end"
+   magenta="$c_start\\e[0;35m$c_end"
+      cyan="$c_start\\e[0;36m$c_end"
+     white="$c_start\\e[0;37m$c_end"
        end="$c_start\\e[0m$c_end" # This is needed at the end.
 
 # Use a different colour for each shell.
