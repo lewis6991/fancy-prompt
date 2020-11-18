@@ -1,4 +1,4 @@
-#!/bin/bash
+#! /usr/bin/env bash
 #-------------------------------------------------------------------------------
 # File        : .prompt
 # Author      : Lewis Russell
@@ -11,8 +11,8 @@
 #-------------------------------------------------------------------------------
    SHELL="$1"
 RET_CODE="$2"
-  NO_SCM="${3:-0}"
- COLUMNS="${4:-$(tput cols)}"
+  NO_SCM="$3"
+CMD_TIME="$4"
 
 #-------------------------------------------------------------------------------
 # Init
@@ -27,6 +27,7 @@ CHECKOUT=""
 AHEAD=""
 BEHIND=""
 STASHES=""
+SUBMODULE_INFO=""
 PORCELAIN_INFO=""
 LOCAL_BRANCHES=""
 
@@ -36,8 +37,6 @@ LOCAL_BRANCHES=""
 # FANCY_PROMPT_DOUBLE_LINE
 
 # FANCY_PROMPT_FETCH_TIMEOUT
-
-# FANCY_PROMPT_RHS_ENABLE
 
 # FANCY_PROMPT_TIMEOUT
 
@@ -155,8 +154,12 @@ get_git_checkout() {
     fi
 
     printf "%s" "$checkout"
-    if [ "$checkout" != "$remote_abbr" ] && [ ! -z "$remote_abbr" ]; then
-        printf "%s" "->$remote_abbr"
+    if [ ! -z "$remote_abbr" ]; then
+        if [ "$checkout" != "$remote_abbr" ]; then
+            printf "%s" "->$remote_abbr"
+        fi
+    else
+        printf "%s" "!"
     fi
 }
 
@@ -171,8 +174,10 @@ set_git_info() {
     else
         info=$(timeout "$TIMEOUT2" git status --untracked-files=normal --porcelain)
     fi
-
     error=$(check_error "$?" "2")
+
+    SUBMODULE_INFO=$(timeout "$TIMEOUT2" git submodule status --recursive)
+    # error=$(check_error "$?" "3")
 
     PORCELAIN_INFO="$info"
 
@@ -241,6 +246,9 @@ get_scm_prompt() {
     local unstaged=""
     local untracked="?"
     local conflicts=""
+    local co_sym
+    local submodule_unsync
+    local submodule_uninit
 
     if [ "$error" == "" ]; then
         # porcelain info should be common between git and svn
@@ -252,7 +260,6 @@ get_scm_prompt() {
             local unstaged=0
             local untracked=0
             local conflicts=0
-
 
             local IFS=$'\n'
             for line in $PORCELAIN_INFO; do
@@ -273,8 +280,17 @@ get_scm_prompt() {
             done
         fi
 
+        if [ "$SUBMODULE_INFO" != "" ]; then
+            submodule_unsync=$(grep -cE '^\+' <<< "$SUBMODULE_INFO")
+            submodule_uninit=$(grep -cE '^-'  <<< "$SUBMODULE_INFO")
+        else
+            submodule_unsync=""
+            submodule_uninit=""
+        fi
+
         if var_enabled "$FANCY_PROMPT_USE_NERD_SYMBOLS"; then
-            co_sym=""
+            # co_sym=""
+            co_sym=""
         elif var_enabled "$FANCY_PROMPT_USE_SYMBOLS"; then
             co_sym=""
         fi
@@ -288,20 +304,39 @@ get_scm_prompt() {
             fi
         }
 
+        build_flag() {
+            local colour=$1
+            local symbol=$2
+            local value=$3
+            if { [[ $value ]] && [[ $value != 0 ]]; }; then
+                echo "$colour$symbol"
+            fi
+        }
+
+        # 穀 者 視 
+        # 
+
         src_ctrl+=$(build_section ""   "$co_sym" "$CHECKOUT"      )
-        src_ctrl+=$(build_section "$white"   '↑' "$AHEAD"         )
-        src_ctrl+=$(build_section "$white"   '↓' "$BEHIND"        )
-        src_ctrl+=$(build_section "$green"   '●' "$staged"        )
-        src_ctrl+=$(build_section "$green"   '+' "$index_added"   )
-        src_ctrl+=$(build_section "$green"   '-' "$index_deleted" )
-        src_ctrl+=$(build_section "$red"     '✖' "$conflicts"     )
-        src_ctrl+=$(build_section "$red"     '+' "$unstaged"      )
-        src_ctrl+=$(build_section "$red"     '-' "$tree_deleted"  )
-        src_ctrl+=$(build_section "$magenta" '…' "$untracked"     )
-        src_ctrl+=$(build_section "$yellow"  '⚑' "$STASHES"       )
-        src_ctrl+=$(build_section "$yellow"  '!' "$LOCAL_BRANCHES")
+        src_ctrl+=$(build_section "$white"   ↑ "$AHEAD"           )
+        src_ctrl+=$(build_section "$white"   ↓ "$BEHIND"          )
+        src_ctrl+=$(build_section "$white"    "$submodule_uninit")
+        src_ctrl+=$(build_section "$red"      "$submodule_unsync")
+        src_ctrl+=$(build_section "$green"   ● "$staged"          )
+        src_ctrl+=$(build_section "$green"   + "$index_added"     )
+        src_ctrl+=$(build_section "$green"   - "$index_deleted"   )
+        src_ctrl+=$(build_section "$red"     ✖ "$conflicts"       )
+        src_ctrl+=$(build_section "$red"     + "$unstaged"        )
+        src_ctrl+=$(build_section "$red"     - "$tree_deleted"    )
+        src_ctrl+=$(build_section "$magenta" + "$untracked"       )
+        # src_ctrl+=$(build_section "$magenta" … "$untracked"       )
+        src_ctrl+=$(build_section "$red"     ⚑ "$STASHES"         )
+        src_ctrl+=$(build_section "$yellow"   "$LOCAL_BRANCHES"  )
     else
         src_ctrl+="$red$error"
+    fi
+
+    if [[ "$src_ctrl" == '' ]]; then
+        src_ctrl='...'
     fi
 
     printf "%s" "${src_ctl_colour}[$src_ctrl$src_ctl_colour]"
@@ -324,23 +359,6 @@ get_prompt_arrow() {
     fi
 
     echo "$ret_colour$arrow$end"
-}
-
-lhs_rhs_prompt() {
-    local lhs=$1
-    local rhs=$2
-    local cols=$3
-    local rhs_no_non_printable
-    local rhs_length
-
-    # Reference: https://en.wikipedia.org/wiki/ANSI_escape_code
-    local save='\e[s' # Save cursor position
-    local restore='\e[u' # Restore cursor to save point
-
-    rhs_no_non_printable=$(remove_invisible_chars "$rhs")
-    rhs_length=${#rhs_no_non_printable}
-
-    printf "%s" "\\[${save}\\e[${cols}C\\e[${rhs_length}D${rhs}${restore}\\]${lhs}"
 }
 
 #-------------------------------------------------------------------------------
@@ -416,32 +434,29 @@ if pwd | grep -q "\\.git"; then
 fi
 
 prompt_info=""
-if ((NO_SCM == 0)); then
-    if in_git; then
+if in_git; then
+    if ((!NO_SCM)); then
         set_git_info
-        prompt_info=$(get_scm_prompt)
-    elif in_svn; then
-        set_svn_info
-        prompt_info=$(get_scm_prompt)
     fi
+    prompt_info=$(get_scm_prompt)
+elif in_svn; then
+    if ((!NO_SCM)); then
+        set_svn_info
+    fi
+    prompt_info=$(get_scm_prompt)
 fi
+
 
 #-------------------------------------------------------------------------------
 # Prompt
 #-------------------------------------------------------------------------------
 prompt=""
-
-# Adjust prompt according on terminal width.
-if [[ $COLUMNS -gt 40 ]] || ! var_enabled "$FANCY_PROMPT_DYNAMIC_WIDTH"; then
-    if [[ $COLUMNS -gt 80 ]] || ! var_enabled "$FANCY_PROMPT_DYNAMIC_WIDTH"; then
-        prompt+="$blue"
-        prompt+="$host:"
-        prompt+="$cyan"
-        prompt+="$user:"
-    fi
-    prompt+="$dir_colour"
-    prompt+="$dir"
-fi
+prompt+="$blue"
+prompt+="$host:"
+prompt+="$cyan"
+prompt+="$user:"
+prompt+="$dir_colour"
+prompt+="$dir "
 
 if [ "$RET_CODE" == 0 ]; then
     ret_colour="$cyan"
@@ -449,14 +464,32 @@ else
     ret_colour="$red"
 fi
 
+convertsecs() {
+    ((d=${1}/86400))
+    ((h=(${1}/3600)%24))
+    ((m=(${1}/60)%60))
+    ((s=${1}%60))
+    if ((d!=0)); then
+        printf "%dd %dh %dm %ds" "$d" "$h" "$m" "$s"
+    elif ((h!=0)); then
+        printf "%dh %dm %ds" "$h" "$m" "$s"
+    elif ((m!=0)); then
+        printf "%dm %ds" "$m" "$s"
+    else
+        printf "%ds" "$s"
+    fi
+}
+
+prompt_time=''
+if [[ $CMD_TIME ]] && ! [[ $CMD_TIME == 0* ]]; then
+    prompt_time="$gray$(convertsecs "$CMD_TIME")"
+fi
+
 prompt_end="$(get_prompt_arrow) "
 
 if var_enabled "$FANCY_PROMPT_DOUBLE_LINE"; then
-    printf "%s" "\\n$prompt$prompt_info\\n$prompt_end"
-elif var_enabled "$FANCY_PROMPT_RHS_ENABLE"; then
-    # TODO: This is buggy when using completion
-    # TODO: Does not work for zsh
-    lhs_rhs_prompt "$prompt$prompt_end" "$prompt_info" "$cols"
+    printf "%s" "$prompt_time\\n"
+    printf "%s" "$prompt$prompt_info\\n$prompt_end"
 else
     printf "%s" "$prompt$prompt_info$prompt_end"
 fi
