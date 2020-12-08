@@ -69,7 +69,8 @@ refresh_prompt_callback() {
 prompt_precmd() {
     local rc="$?"
     local timer_show
-    local gray='%{\e[1;30m%}'
+    local gray='%{\e[0;90m%}'
+    local reset='%{\e[0m%}'
 
     if (( prompt_timer )); then
         timer_show=$((SECONDS - prompt_timer))
@@ -77,7 +78,7 @@ prompt_precmd() {
         unset prompt_timer
     fi
 
-    RPROMPT=$(echo -n "$gray$(date +"%1e/%1m %H:%M")")
+    RPROMPT=$(echo -n "$gray$(date +"%1e/%1m %H:%M")$reset")
     PROMPT=$(echo -n "$(~/.prompt zsh 0 1 "")")
     refresh "$rc" "$timer_show"
 }

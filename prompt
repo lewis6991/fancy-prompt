@@ -289,8 +289,8 @@ get_scm_prompt() {
         fi
 
         if var_enabled "$FANCY_PROMPT_USE_NERD_SYMBOLS"; then
-            # co_sym=""
-            co_sym=""
+            co_sym=""
+            # co_sym=""
         elif var_enabled "$FANCY_PROMPT_USE_SYMBOLS"; then
             co_sym=""
         fi
@@ -403,7 +403,7 @@ fi
    # reverse="${c_start}\\e[3;35m${c_end}"
 # underlined="${c_start}\\e[4;35m${c_end}"
        # dim="${c_start}\\e[10;35m${c_end}"
-      gray="$c_start\\e[1;30m$c_end"
+      gray="$c_start\\e[0;90m$c_end"
        red="$c_start\\e[0;31m$c_end"
      green="$c_start\\e[0;32m$c_end"
     yellow="$c_start\\e[0;33m$c_end"
