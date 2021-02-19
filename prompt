@@ -89,17 +89,14 @@ get_svn_remote_rev() {
 }
 
 vercomp() {
-    local IFS=.
     local i
 
     if [[ "$1" == "$2" ]]; then
         return 0
     fi
 
-    # shellcheck disable=SC2206
-    local ver1=($1)
-    # shellcheck disable=SC2206
-    local ver2=($2)
+    local ver1; IFS=. read -ra ver1 <<< "$1"
+    local ver2; IFS=. read -ra ver2 <<< "$2"
 
     # fill empty fields in ver1 with zeros
     for ((i=${#ver1[@]}; i<${#ver2[@]}; i++)); do
@@ -121,23 +118,28 @@ vercomp() {
 
 git_bg_fetch() {
     if [[ -n $(git remote show) ]]; then
-        local repo; repo=$(git rev-parse --show-toplevel 2> /dev/null)
+        local repo
+        repo=$(git rev-parse --show-toplevel 2> /dev/null)
+
         local fetch_head="$repo/.git/FETCH_HEAD"
 
         if [[ -e "$fetch_head" ]]; then
             local old_head
-
             old_head=$(find "$fetch_head" -mmin +"$FETCH_TIMEOUT" 2> /dev/null)
 
             if [[ -n "$old_head" ]]; then
-                git fetch --quiet &> /dev/null
+                echo 'FETCHING'
+                touch "$fetch_head"
+                git fetch --no-recurse-submodules --quiet &> /dev/null
             fi
         fi
     fi
 }
 
 get_git_checkout() {
-    local rp=($(git rev-parse --abbrev-ref HEAD --git-dir '@{u}'))
+    local rp
+    mapfile -t rp < <(git rev-parse --abbrev-ref HEAD --git-dir '@{u}')
+
     local checkout="${rp[0]}"
     local git_dir="${rp[1]}"
     local remote_full="${rp[2]}"
@@ -154,7 +156,7 @@ get_git_checkout() {
     fi
 
     printf "%s" "$checkout"
-    if [ ! -z "$remote_abbr" ]; then
+    if [ -n "$remote_abbr" ]; then
         if [ "$checkout" != "$remote_abbr" ]; then
             printf "%s" "->$remote_abbr"
         fi
@@ -167,7 +169,8 @@ set_git_info() {
     local info
     local error
 
-    local git_version=$(git --version | sed -E 's/git version ([0-9.]+)/\1/g')
+    local git_version
+    git_version=$(git --version | sed -E 's/git version ([0-9.]+)/\1/g')
 
     if vercomp "$git_version" "1.7.2"; then
         info=$(timeout "$TIMEOUT2" git status --untracked-files=normal --branch --porcelain "$GIT_STATUS_OPTS")
@@ -176,7 +179,7 @@ set_git_info() {
     fi
     error=$(check_error "$?" "2")
 
-    SUBMODULE_INFO=$(timeout "$TIMEOUT2" git submodule status --recursive)
+    SUBMODULE_INFO=$(timeout "$TIMEOUT2" git submodule status --recursive 2> /dev/null)
     # error=$(check_error "$?" "3")
 
     PORCELAIN_INFO="$info"
@@ -193,10 +196,10 @@ set_git_info() {
             # LOCAL_BRANCHES=$(git branch | cut -c 3- | grep -v master | wc -l)
 
             # Local branches that do not have an upstream of the same name
-            if vercomp "$git_version" "2.0.0"; then
+            if vercomp "$git_version" "2.4.0"; then
                 LOCAL_BRANCHES=$(git branch -vv --format='%(refname:strip=2)#%(upstream:strip=3)' | grep -vcE '([^#]+)#\1')
             else
-                LOCAL_BRANCHES=$(git branch | cut -c 3- | grep -v master | wc -l)
+                LOCAL_BRANCHES=$(git branch | grep -cv master)
             fi
 
             if vercomp "$git_version" "1.7.2"; then
@@ -382,7 +385,7 @@ if [ "$SHELL" == "bash" ]; then
        user='\u'
        host='\H'
     if in_git; then
-        dir=$(basename $(git rev-parse --show-toplevel))/$(git rev-parse --show-prefix)
+        dir=$(basename "$(git rev-parse --show-toplevel)")/$(git rev-parse --show-prefix)
         dir=${dir%?}  # Remove last /
     else
         dir='\W'
@@ -393,7 +396,7 @@ else # csh, tcsh and zsh
        user='%n'
        host='%m'
     if in_git; then
-        dir=$(basename $(git rev-parse --show-toplevel))/$(git rev-parse --show-prefix)
+        dir=$(basename "$(git rev-parse --show-toplevel)")/$(git rev-parse --show-prefix)
         dir=${dir%?}  # Remove last /
     else
         dir='%c'
