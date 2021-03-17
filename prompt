@@ -149,9 +149,12 @@ get_git_checkout() {
         # Show short hash if not on a branch
         checkout=$(git rev-parse --short HEAD)
 
-        # Are we rebasing?
-        if ls "$git_dir"/rebase* > /dev/null 2>&1; then
+        if [[ -d "$git_dir/rebase-merge" || -d "$git_dir/rebase-apply" ]]; then
+            # Are we rebasing?
             checkout="$checkout(rebasing)"
+        elif [[ -f "$git_dir/BISECT_START" ]]; then
+            # Are we bisecting?
+            checkout="$checkout(bisecting)"
         fi
     fi
 
