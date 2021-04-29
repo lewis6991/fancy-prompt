@@ -24,6 +24,7 @@ unalias -a
 # Globals
 #-------------------------------------------------------------------------------
 CHECKOUT=""
+CHECKOUT_IS_TAG=0
 AHEAD=""
 BEHIND=""
 STASHES=""
@@ -136,35 +137,40 @@ git_bg_fetch() {
     fi
 }
 
-get_git_checkout() {
+set_git_checkout() {
     local rp
     mapfile -t rp < <(git rev-parse --abbrev-ref HEAD --git-dir '@{u}')
 
-    local checkout="${rp[0]}"
+    CHECKOUT="${rp[0]}"
+
     local git_dir="${rp[1]}"
     local remote_full="${rp[2]}"
     local remote_abbr="${remote_full#*/}"
 
-    if [[ "$checkout" =~ HEAD ]]; then
+    if [[ "$CHECKOUT" =~ HEAD ]]; then
+        local tag
+
         # Show short hash if not on a branch
-        checkout=$(git rev-parse --short HEAD)
+        CHECKOUT=$(git rev-parse --short HEAD)
 
         if [[ -d "$git_dir/rebase-merge" || -d "$git_dir/rebase-apply" ]]; then
             # Are we rebasing?
-            checkout="$checkout(rebasing)"
+            CHECKOUT="$CHECKOUT(rebasing)"
         elif [[ -f "$git_dir/BISECT_START" ]]; then
             # Are we bisecting?
-            checkout="$checkout(bisecting)"
+            CHECKOUT="$CHECKOUT(bisecting)"
+        elif tag=$(git describe --candidates=1 --exact-match); then
+            CHECKOUT=$tag
+            CHECKOUT_IS_TAG=1
         fi
     fi
 
-    printf "%s" "$checkout"
     if [ -n "$remote_abbr" ]; then
-        if [ "$checkout" != "$remote_abbr" ]; then
-            printf "%s" "->$remote_abbr"
+        if [ "$CHECKOUT" != "$remote_abbr" ]; then
+            CHECKOUT="$CHECKOUT->$remote_abbr"
         fi
-    else
-        printf "%s" "!"
+    elif [[ $CHECKOUT_IS_TAG != 1 ]]; then
+        CHECKOUT="$CHECKOUT!"
     fi
 }
 
@@ -206,7 +212,7 @@ set_git_info() {
             fi
 
             if vercomp "$git_version" "1.7.2"; then
-                CHECKOUT=$(get_git_checkout)
+                set_git_checkout
             else
                 CHECKOUT="!$(git rev-parse --abbrev-ref HEAD)"
             fi
@@ -295,7 +301,11 @@ get_scm_prompt() {
         fi
 
         if var_enabled "$FANCY_PROMPT_USE_NERD_SYMBOLS"; then
-            co_sym=""
+            if [[ $CHECKOUT_IS_TAG == 1 ]]; then
+                co_sym=""
+            else
+                co_sym=""
+            fi
             # co_sym=""
         elif var_enabled "$FANCY_PROMPT_USE_SYMBOLS"; then
             co_sym=""
@@ -310,33 +320,23 @@ get_scm_prompt() {
             fi
         }
 
-        build_flag() {
-            local colour=$1
-            local symbol=$2
-            local value=$3
-            if { [[ $value ]] && [[ $value != 0 ]]; }; then
-                echo "$colour$symbol"
-            fi
-        }
+        # 穀 者 視  
 
-        # 穀 者 視 
-        # 
-
-        src_ctrl+=$(build_section ""   "$co_sym" "$CHECKOUT"      )
-        src_ctrl+=$(build_section "$white"   ↑ "$AHEAD"           )
-        src_ctrl+=$(build_section "$white"   ↓ "$BEHIND"          )
-        src_ctrl+=$(build_section "$white"    "$submodule_uninit")
-        src_ctrl+=$(build_section "$red"      "$submodule_unsync")
-        src_ctrl+=$(build_section "$green"   ● "$staged"          )
-        src_ctrl+=$(build_section "$green"   + "$index_added"     )
-        src_ctrl+=$(build_section "$green"   - "$index_deleted"   )
-        src_ctrl+=$(build_section "$red"     ✖ "$conflicts"       )
-        src_ctrl+=$(build_section "$red"     + "$unstaged"        )
-        src_ctrl+=$(build_section "$red"     - "$tree_deleted"    )
-        src_ctrl+=$(build_section "$magenta" + "$untracked"       )
-        # src_ctrl+=$(build_section "$magenta" … "$untracked"       )
-        src_ctrl+=$(build_section "$red"     ⚑ "$STASHES"         )
-        src_ctrl+=$(build_section "$yellow"   "$LOCAL_BRANCHES"  )
+        src_ctrl+=$(build_section "$gray"   "$co_sym" "$CHECKOUT"        )
+        src_ctrl+=$(build_section " $white"   ↑        "$AHEAD"           )
+        src_ctrl+=$(build_section " $white"   ↓        "$BEHIND"          )
+        src_ctrl+=$(build_section " $white"           "$submodule_uninit")
+        src_ctrl+=$(build_section " $red"             "$submodule_unsync")
+        src_ctrl+=$(build_section " $green"   ●        "$staged"          )
+        src_ctrl+=$(build_section " $green"   +        "$index_added"     )
+        src_ctrl+=$(build_section " $green"   -        "$index_deleted"   )
+        src_ctrl+=$(build_section " $red"     ✖        "$conflicts"       )
+        src_ctrl+=$(build_section " $red"     +        "$unstaged"        )
+        src_ctrl+=$(build_section " $red"     -        "$tree_deleted"    )
+        # src_ctrl+=$(build_section " $magenta" +        "$untracked"       )
+        src_ctrl+=$(build_section " $magenta" …        "$untracked"       )
+        src_ctrl+=$(build_section " $red"     ⚑        "$STASHES"         )
+        src_ctrl+=$(build_section " $yellow"          "$LOCAL_BRANCHES"  )
     else
         src_ctrl+="$red$error"
     fi
@@ -345,11 +345,7 @@ get_scm_prompt() {
         src_ctrl='...'
     fi
 
-    printf "%s" "${src_ctl_colour}[$src_ctrl$src_ctl_colour]"
-}
-
-remove_invisible_chars() {
-    printf '%b' "$1" | sed 's/\\[\x1B\[[0-9;]*[a-zA-Z]\\]//g'
+    printf "%s" "${src_ctl_colour}$src_ctrl$src_ctl_colour"
 }
 
 get_prompt_arrow() {
