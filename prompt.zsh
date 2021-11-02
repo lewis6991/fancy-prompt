@@ -83,5 +83,10 @@ prompt_precmd() {
     refresh "$rc" "$timer_show"
 }
 
-add-zsh-hook preexec cmd_timer_preexec
-add-zsh-hook precmd  prompt_precmd
+if ! typeset -f async_job > /dev/null; then
+    echo "error: fancy-prompt requires zsh-async"
+else
+    add-zsh-hook preexec cmd_timer_preexec
+    add-zsh-hook precmd  prompt_precmd
+fi
+
