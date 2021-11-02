@@ -15,6 +15,23 @@
 
 Requires mafredri/zsh-async.
 
+#### Using [zimfw](https://github.com/zimfw/zimfw)
+
+Add the following to your `.zimrc`:
+
+```zsh
+zmodule mafredri/zsh-async --name async
+zmodule lewis6991/fancy-prompt
+```
+
+Then:
+
+```zsh
+zimfw install
+```
+
+#### Manually
+
 Add the following to your `.zshrc`:
 ```zsh
 source path/to/fancy_prompt/prompt.zsh
