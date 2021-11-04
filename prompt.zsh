@@ -17,7 +17,7 @@ prompt_async_renice() {
 # The output of this is given as $3 of refresh_prompt_callback (the callback)
 update_prompt() {
     local rc="$1" timer_show="$2"
-    ~/.prompt zsh "$rc" 0 "$timer_show"
+    $BASE/prompt zsh "$rc" 0 "$timer_show"
 }
 
 refresh() {
@@ -79,7 +79,7 @@ prompt_precmd() {
     fi
 
     RPROMPT=$(echo -n "$gray$(date +"%1e/%1m %H:%M")$reset")
-    PROMPT=$(echo -n "$(~/.prompt zsh 0 1 "")")
+    PROMPT=$(echo -n "$($BASE/prompt zsh 0 1 "")")
     refresh "$rc" "$timer_show"
 }
 
