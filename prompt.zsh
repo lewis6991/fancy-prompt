@@ -14,10 +14,15 @@ prompt_async_renice() {
     fi
 }
 
+function source_bash {
+  emulate -L bash
+  builtin source "$@"
+}
+
 # The output of this is given as $3 of refresh_prompt_callback (the callback)
 update_prompt() {
     local rc="$1" timer_show="$2"
-    $BASE/prompt zsh "$rc" 0 "$timer_show"
+    source_bash $BASE/prompt zsh "$rc" 0 "$timer_show"
 }
 
 refresh() {
@@ -66,6 +71,11 @@ refresh_prompt_callback() {
     esac
 }
 
+# Start gitstatusd instance with name "MY". The same name is passed to
+# gitstatus_query in gitstatus_prompt_update. The flags with -1 as values
+# enable staged, unstaged, conflicted and untracked counters.
+gitstatus_stop 'MY' && gitstatus_start -s -1 -u -1 -c -1 -d -1 'MY'
+
 prompt_precmd() {
     local rc="$?"
     local timer_show
@@ -79,7 +89,7 @@ prompt_precmd() {
     fi
 
     RPROMPT=$(echo -n "$gray$(date +"%1e/%1m %H:%M")$reset")
-    PROMPT=$(echo -n "$($BASE/prompt zsh 0 1 "")")
+    PROMPT=$(echo -n "$(source_bash $BASE/prompt zsh 0 1 "")")
     refresh "$rc" "$timer_show"
 }
 

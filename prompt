@@ -9,9 +9,9 @@
 #-------------------------------------------------------------------------------
 # Arguments
 #-------------------------------------------------------------------------------
-   SHELL="$1"
+SHELL="$1"
 RET_CODE="$2"
-  NO_SCM="$3"
+NO_SCM="$3"
 CMD_TIME="$4"
 
 #-------------------------------------------------------------------------------
@@ -25,11 +25,16 @@ unalias -a
 #-------------------------------------------------------------------------------
 CHECKOUT=""
 CHECKOUT_IS_TAG=0
-AHEAD=""
-BEHIND=""
+STAGED_CHANGED=""
+STAGED_ADDED=""
+STAGED_DELETED=""
+CONFLICTS=""
+UNSTAGED_CHANGED=""
+UNSTAGED_DELETED=""
+UNTRACKED=""
 STASHES=""
-SUBMODULE_INFO=""
-PORCELAIN_INFO=""
+SUBMODULE_UNSYNC=""
+SUBMODULE_UNINIT=""
 LOCAL_BRANCHES=""
 
 #-------------------------------------------------------------------------------
@@ -65,7 +70,11 @@ check_error() {
 }
 
 in_git() {
-    [[ $(git rev-parse --is-inside-work-tree 2> /dev/null) == "true" ]]
+    if [[ "$VCS_STATUS_RESULT" != "" ]]; then
+        [[ "$VCS_STATUS_RESULT" == "norepo-sync" ]]
+    else
+        [[ $(git rev-parse --is-inside-work-tree 2> /dev/null) = "true" ]]
+    fi
 }
 
 in_svn() {
@@ -92,7 +101,7 @@ get_svn_remote_rev() {
 vercomp() {
     local i
 
-    if [[ "$1" == "$2" ]]; then
+    if [[ "$1" = "$2" ]]; then
         return 0
     fi
 
@@ -117,24 +126,12 @@ vercomp() {
     return 1
 }
 
-git_bg_fetch() {
-    if [[ -n $(git remote show) ]]; then
-        local repo
-        repo=$(git rev-parse --show-toplevel 2> /dev/null)
-
-        local fetch_head="$repo/.git/FETCH_HEAD"
-
-        if [[ -e "$fetch_head" ]]; then
-            local old_head
-            old_head=$(find "$fetch_head" -mmin +"$FETCH_TIMEOUT" 2> /dev/null)
-
-            if [[ -n "$old_head" ]]; then
-                echo 'FETCHING'
-                touch "$fetch_head"
-                git fetch --no-recurse-submodules --quiet &> /dev/null
-            fi
-        fi
+git_vercomp() {
+    if [ -z "$GIT_VERSION" ]; then
+        GIT_VERSION=$(git --version | sed -E 's/git version ([0-9.]+)/\1/g')
     fi
+
+    vercomp "$GIT_VERSION" "$1"
 }
 
 set_git_checkout() {
@@ -174,52 +171,116 @@ set_git_checkout() {
     fi
 }
 
+parse_porcelain_info() {
+    local porcelain_info=$1
+    # porcelain info should be common between git and svn
+    if [ "$porcelain_info" != "?" ]; then
+        STAGED_CHANGED=0
+        STAGED_ADDED=0
+        STAGED_DELETED=0
+        UNSTAGED_DELETED=0
+        UNSTAGED_CHANGED=0
+        UNTRACKED=0
+        CONFLICTS=0
+
+        while IFS= read -r line ; do
+            if [[ $line =~ ^[MRC][\ MD] ]]; then ((STAGED_CHANGED   ++)); fi
+            if [[ $line =~ ^A[\ MD]     ]]; then ((INDEX_NEW        ++)); fi
+            if [[ $line =~ ^D\          ]]; then ((STAGED_DELETED   ++)); fi
+            if [[ $line =~ ^[\ MARC]D   ]]; then ((UNSTAGED_DELETED ++)); fi
+            if [[ $line =~ ^[\ MARC]M   ]]; then ((UNSTAGED_CHANGED ++)); fi
+            if [[ $line =~ ^\?\?        ]]; then ((UNTRACKED        ++)); fi
+            if [[ $line =~ ^[DU][DU]    ]]; then ((CONFLICTS        ++)); fi
+            if [[ $line =~ ^[AU][AU]    ]]; then ((CONFLICTS        ++)); fi
+            # DD  unmerged, both deleted
+            # AU  unmerged, added by us
+            # UD  unmerged, deleted by them
+            # UA  unmerged, added by them
+            # DU  unmerged, deleted by us
+            # AA  unmerged, both added
+            # UU  unmerged, both modified
+        done <<< "$porcelain_info"
+    fi
+}
+
+set_git_submodule_info() {
+    local submodule_info
+    submodule_info=$(timeout "$TIMEOUT2" git submodule status --recursive 2> /dev/null)
+    if [ "$submodule_info" != "" ]; then
+        SUBMODULE_UNSYNC=$(grep -cE '^\+' <<< "$submodule_info")
+        SUBMODULE_UNINIT=$(grep -cE '^-'  <<< "$submodule_info")
+    fi
+}
+
+set_git_local_branches() {
+    # Local branches that do not have an upstream of the same name
+    if git_vercomp "2.4.0"; then
+        LOCAL_BRANCHES=$(git branch -vv --format='%(refname:strip=2)#%(upstream:strip=3)' | grep -vcE '([^#]+)#\1')
+    else
+        LOCAL_BRANCHES=$(git branch | grep -cv master)
+    fi
+}
+
+set_gitstatus_info() {
+    gitstatus_query 'MY' || return 1
+
+    STAGED_CHANGED=$VCS_STATUS_NUM_STAGED
+    STAGED_ADDED=$VCS_STATUS_NUM_STAGED_NEW
+    STAGED_DELETED=$VCS_STATUS_NUM_STAGED_DELETED
+    CONFLICTS=$VCS_STATUS_NUM_CONFLICTED
+    UNSTAGED_CHANGED=$VCS_STATUS_NUM_UNSTAGED
+    UNSTAGED_DELETED=$VCS_STATUS_NUM_UNSTAGED_DELETED
+    UNTRACKED=$VCS_STATUS_NUM_UNTRACKED
+    STASHES=$VCS_STATUS_STASHES
+    COMMITS_AHEAD=$VCS_STATUS_COMMITS_AHEAD
+    COMMITS_BEHIND=$VCS_STATUS_COMMITS_BEHIND
+
+    if [[ -n $VCS_STATUS_LOCAL_BRANCH ]]; then
+        CHECKOUT=$VCS_STATUS_LOCAL_BRANCH
+    elif [[ -n $VCS_STATUS_TAG ]]; then
+        CHECKOUT=$VCS_STATUS_TAG
+        CHECKOUT_IS_TAG=1
+    else
+        CHECKOUT=${VCS_STATUS_COMMIT[1,8]}
+    fi
+
+    set_git_submodule_info
+    set_git_local_branches
+}
+
 set_git_info() {
     local info
     local error
 
-    local git_version
-    git_version=$(git --version | sed -E 's/git version ([0-9.]+)/\1/g')
-
-    if vercomp "$git_version" "1.7.2"; then
+    if git_vercomp "1.7.2"; then
         info=$(timeout "$TIMEOUT2" git status --untracked-files=normal --branch --porcelain "$GIT_STATUS_OPTS")
     else
         info=$(timeout "$TIMEOUT2" git status --untracked-files=normal --porcelain)
     fi
     error=$(check_error "$?" "2")
 
-    SUBMODULE_INFO=$(timeout "$TIMEOUT2" git submodule status --recursive 2> /dev/null)
-    # error=$(check_error "$?" "3")
+    set_git_submodule_info
 
-    PORCELAIN_INFO="$info"
+    parse_porcelain_info "$info"
 
-    if [ "$error" == "" ]; then
+    if [ "$error" = "" ]; then
         branch_info=$(head -1 <<< "$info")
-         AHEAD=$(grep 'ahead'  <<< "$branch_info" | sed -E  's/.*ahead ([0-9]+).*/\1/g')
-        BEHIND=$(grep 'behind' <<< "$branch_info" | sed -E 's/.*behind ([0-9]+).*/\1/g')
+        COMMITS_AHEAD=$(grep 'ahead'  <<< "$branch_info" | sed -E  's/.*ahead ([0-9]+).*/\1/g')
+        COMMITS_BEHIND=$(grep 'behind' <<< "$branch_info" | sed -E 's/.*behind ([0-9]+).*/\1/g')
         error=$(check_error "$?" "4")
 
         if [ "$error" == "" ]; then
             STASHES=$(git stash list | wc -l)
-            # LOCAL_BRANCHES=$(git branch -vv | cut -c 3- | awk '$3 !~/\[origin/ { print $1 }' | wc -l)
-            # LOCAL_BRANCHES=$(git branch | cut -c 3- | grep -v master | wc -l)
 
-            # Local branches that do not have an upstream of the same name
-            if vercomp "$git_version" "2.4.0"; then
-                LOCAL_BRANCHES=$(git branch -vv --format='%(refname:strip=2)#%(upstream:strip=3)' | grep -vcE '([^#]+)#\1')
-            else
-                LOCAL_BRANCHES=$(git branch | grep -cv master)
-            fi
+            set_git_local_branches
 
-            if vercomp "$git_version" "1.7.2"; then
+            if git_vercomp "1.7.2"; then
                 set_git_checkout
             else
                 CHECKOUT="!$(git rev-parse --abbrev-ref HEAD)"
             fi
         fi
     fi
-
-    # git_bg_fetch
 }
 
 set_svn_info() {
@@ -237,14 +298,16 @@ set_svn_info() {
         remote_rev=$(get_svn_remote_rev "$info")
 
         if [[ $remote_rev =~ ^[0-9]+$ ]]; then
-            BEHIND=$((remote_rev - local_rev))
+            COMMITS_BEHIND=$((remote_rev - local_rev))
         else
             error=$(check_error "1" "9")
         fi
 
-        if PORCELAIN_INFO=$(timeout "$TIMEOUT" svn status 2> /dev/null); then
-            PORCELAIN_INFO="?"
+        local porcelain_info
+        if porcelain_info=$(timeout "$TIMEOUT" svn status 2> /dev/null); then
+            porcelain_info="?"
         fi
+        parse_porcelain_info "$porcelain_info"
 
         CHECKOUT="r$local_rev"
     fi
@@ -252,54 +315,9 @@ set_svn_info() {
 
 get_scm_prompt() {
     local src_ctrl=""
-    local staged=""
-    local tree_deleted=""
-    local index_deleted=""
-    local unstaged=""
-    local untracked="?"
-    local conflicts=""
     local co_sym
-    local submodule_unsync
-    local submodule_uninit
 
-    if [ "$error" == "" ]; then
-        # porcelain info should be common between git and svn
-        if [ "$PORCELAIN_INFO" != "?" ]; then
-            local staged=0
-            local index_added=0
-            local index_deleted=0
-            local tree_deleted=0
-            local unstaged=0
-            local untracked=0
-            local conflicts=0
-
-            local IFS=$'\n'
-            for line in $PORCELAIN_INFO; do
-                if [[ $line =~ ^[MRC][\ MD]            ]]; then ((staged        ++)); fi
-                if [[ $line =~ ^A[\ MD]                ]]; then ((index_added   ++)); fi
-                if [[ $line =~ ^D\                     ]]; then ((index_deleted ++)); fi
-                if [[ $line =~ ^[\ MARC]D              ]]; then ((tree_deleted  ++)); fi
-                if [[ $line =~ ^[\ MARC]M              ]]; then ((unstaged      ++)); fi
-                if [[ $line =~ ^\?\?                   ]]; then ((untracked     ++)); fi
-                if [[ $line =~ ^(DD|AU|UD|UA|DU|AA|UU) ]]; then ((conflicts     ++)); fi
-                # DD  unmerged, both deleted
-                # AU  unmerged, added by us
-                # UD  unmerged, deleted by them
-                # UA  unmerged, added by them
-                # DU  unmerged, deleted by us
-                # AA  unmerged, both added
-                # UU  unmerged, both modified
-            done
-        fi
-
-        if [ "$SUBMODULE_INFO" != "" ]; then
-            submodule_unsync=$(grep -cE '^\+' <<< "$SUBMODULE_INFO")
-            submodule_uninit=$(grep -cE '^-'  <<< "$SUBMODULE_INFO")
-        else
-            submodule_unsync=""
-            submodule_uninit=""
-        fi
-
+    if [ "$error" = "" ]; then
         if var_enabled "$FANCY_PROMPT_USE_NERD_SYMBOLS"; then
             if [[ $CHECKOUT_IS_TAG == 1 ]]; then
                 co_sym=""
@@ -323,18 +341,18 @@ get_scm_prompt() {
         # 穀 者 視  
 
         src_ctrl+=$(build_section "$gray"   "$co_sym" "$CHECKOUT"        )
-        src_ctrl+=$(build_section " $white"   ↑        "$AHEAD"           )
-        src_ctrl+=$(build_section " $white"   ↓        "$BEHIND"          )
-        src_ctrl+=$(build_section " $white"           "$submodule_uninit")
-        src_ctrl+=$(build_section " $red"             "$submodule_unsync")
-        src_ctrl+=$(build_section " $green"   ●        "$staged"          )
-        src_ctrl+=$(build_section " $green"   +        "$index_added"     )
-        src_ctrl+=$(build_section " $green"   -        "$index_deleted"   )
-        src_ctrl+=$(build_section " $red"     ✖        "$conflicts"       )
-        src_ctrl+=$(build_section " $red"     +        "$unstaged"        )
-        src_ctrl+=$(build_section " $red"     -        "$tree_deleted"    )
-        # src_ctrl+=$(build_section " $magenta" +        "$untracked"       )
-        src_ctrl+=$(build_section " $magenta" …        "$untracked"       )
+        src_ctrl+=$(build_section " $white"   ↑        "$COMMITS_AHEAD"   )
+        src_ctrl+=$(build_section " $white"   ↓        "$COMMITS_BEHIND"  )
+        src_ctrl+=$(build_section " $white"           "$SUBMODULE_UNINIT")
+        src_ctrl+=$(build_section " $red"             "$SUBMODULE_UNSYNC")
+        src_ctrl+=$(build_section " $green"   ●        "$STAGED_CHANGED"  )
+        src_ctrl+=$(build_section " $green"   +        "$STAGED_ADDED"    )
+        src_ctrl+=$(build_section " $green"   -        "$STAGED_DELETED"  )
+        src_ctrl+=$(build_section " $red"     ✖        "$CONFLICTS"       )
+        src_ctrl+=$(build_section " $red"     +        "$UNSTAGED_CHANGED")
+        src_ctrl+=$(build_section " $red"     -        "$UNSTAGED_DELETED")
+        # src_ctrl+=$(build_section " $magenta" +        "$UNTRACKED"       )
+        src_ctrl+=$(build_section " $magenta" …        "$UNTRACKED"       )
         src_ctrl+=$(build_section " $red"     ⚑        "$STASHES"         )
         src_ctrl+=$(build_section " $yellow"          "$LOCAL_BRANCHES"  )
     else
@@ -367,9 +385,8 @@ get_prompt_arrow() {
 # Configuration
 #-------------------------------------------------------------------------------
 GIT_STATUS_OPTS="--ignore-submodules"
-        TIMEOUT=${FANCY_PROMPT_TIMEOUT-3}
-       TIMEOUT2=$((TIMEOUT*2))
-  FETCH_TIMEOUT=${FANCY_PROMPT_FETCH_TIMEOUT-1}
+TIMEOUT=${FANCY_PROMPT_TIMEOUT-3}
+TIMEOUT2=$((TIMEOUT*2))
 
 if var_enabled "$FANCY_PROMPT_USE_NERD_SYMBOLS"; then
     FANCY_PROMPT_USE_SYMBOLS=1
@@ -380,40 +397,28 @@ fi
 #-------------------------------------------------------------------------------
 if [ "$SHELL" == "bash" ]; then
     c_start='\['
-      c_end='\]'
-       user='\u'
-       host='\H'
-    if in_git; then
-        dir=$(basename "$(git rev-parse --show-toplevel)")/$(git rev-parse --show-prefix)
-        dir=${dir%?}  # Remove last /
-    else
-        dir='\W'
-    fi
+    c_end='\]'
+    user='\u'
+    host='\H'
 else # csh, tcsh and zsh
     c_start='%{'
-      c_end='%}'
-       user='%n'
-       host='%m'
-    if in_git; then
-        dir=$(basename "$(git rev-parse --show-toplevel)")/$(git rev-parse --show-prefix)
-        dir=${dir%?}  # Remove last /
-    else
-        dir='%c'
-    fi
+    c_end='%}'
+    user='%n'
+    host='%m'
 fi
 
-   # reverse="${c_start}\\e[3;35m${c_end}"
+# reverse="${c_start}\\e[3;35m${c_end}"
 # underlined="${c_start}\\e[4;35m${c_end}"
-       # dim="${c_start}\\e[10;35m${c_end}"
-      gray="$c_start\\e[0;90m$c_end"
-       red="$c_start\\e[0;31m$c_end"
-     green="$c_start\\e[0;32m$c_end"
-    yellow="$c_start\\e[0;33m$c_end"
-      blue="$c_start\\e[0;34m$c_end"
-   magenta="$c_start\\e[0;35m$c_end"
-      cyan="$c_start\\e[0;36m$c_end"
-     white="$c_start\\e[0;37m$c_end"
-       end="$c_start\\e[0m$c_end" # This is needed at the end.
+# dim="${c_start}\\e[10;35m${c_end}"
+gray="$c_start\\e[0;90m$c_end"
+red="$c_start\\e[0;31m$c_end"
+green="$c_start\\e[0;32m$c_end"
+yellow="$c_start\\e[0;33m$c_end"
+blue="$c_start\\e[0;34m$c_end"
+magenta="$c_start\\e[0;35m$c_end"
+cyan="$c_start\\e[0;36m$c_end"
+white="$c_start\\e[0;37m$c_end"
+end="$c_start\\e[0m$c_end" # This is needed at the end.
 
 # Use a different colour for each shell.
 
@@ -438,7 +443,11 @@ fi
 prompt_info=""
 if in_git; then
     if ((!NO_SCM)); then
-        set_git_info
+        if type gitstatus_query &>/dev/null; then
+            set_gitstatus_info
+        else
+            set_git_info
+        fi
     fi
     prompt_info=$(get_scm_prompt)
 elif in_svn; then
@@ -448,6 +457,17 @@ elif in_svn; then
     prompt_info=$(get_scm_prompt)
 fi
 
+
+if [[ $VCS_STATUS_WORKDIR != "" ]]; then
+    dir=$(basename "$VCS_STATUS_WORKDIR")
+elif in_git; then
+    dir=$(basename "$(git rev-parse --show-toplevel)")/$(git rev-parse --show-prefix)
+    dir=${dir%?}  # Remove last /
+elif [ "$SHELL" == "bash" ]; then
+    dir='\W'
+else
+    dir='%c'
+fi
 
 #-------------------------------------------------------------------------------
 # Prompt

@@ -4,6 +4,7 @@
 * Gives you basic information about your git or svn checkout.
 * Supports bash, csh and tcsh.
 * Asynchronous! (zsh only)
+* Integrates with [gitstatus](https://github.com/romkatv/gitstatus] (zsh only)
 
 # Screenshot
 
@@ -20,6 +21,7 @@ Requires mafredri/zsh-async.
 Add the following to your `.zimrc`:
 
 ```zsh
+zmodule romkatv/gitstatus  # optional
 zmodule mafredri/zsh-async --name async
 zmodule lewis6991/fancy-prompt
 ```
