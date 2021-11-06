@@ -14,25 +14,31 @@ prompt_async_renice() {
     fi
 }
 
-function source_bash {
-  emulate -L bash
-  builtin source "$@"
+# The output of this is given as $3 of refresh_prompt_callback (the callback)
+update_prompt_sub() {
+    local rc="$1" timer_show="$2"
+    $BASE/prompt zsh "$rc" 0 "$timer_show"
 }
 
-# The output of this is given as $3 of refresh_prompt_callback (the callback)
 update_prompt() {
     local rc="$1" timer_show="$2"
-    source_bash $BASE/prompt zsh "$rc" 0 "$timer_show"
+    PROMPT=$(echo -n \
+      "$(eval $(typeset -m 'VCS*') $BASE/prompt zsh "$rc" 0 "$timer_show")")
+    zle .reset-prompt
 }
 
 refresh() {
     local rc="$1" timer_show="$2"
 
-    async_stop_worker       gitprompt
-    async_start_worker      gitprompt -z
-    async_register_callback gitprompt refresh_prompt_callback
-    async_worker_eval       gitprompt prompt_async_renice
-    async_job               gitprompt update_prompt "$rc" "$timer_show"
+    if type gitstatus_query &>/dev/null; then
+        gitstatus_query -t 0 -c "update_prompt '$rc' '$timer_show'" 'MY'
+    else
+        async_stop_worker       gitprompt
+        async_start_worker      gitprompt -z
+        async_register_callback gitprompt refresh_prompt_callback
+        async_worker_eval       gitprompt prompt_async_renice
+        async_job               gitprompt update_prompt_sub "$rc" "$timer_show"
+    fi
 }
 
 refresh_prompt_callback() {
@@ -61,7 +67,7 @@ refresh_prompt_callback() {
                 echo "ERROR 45 ($err): $outerr"
             fi
             ;;
-        update_prompt)
+        update_prompt_sub)
             last_prompt="$PROMPT"
             PROMPT="$(echo -n $output)"
             if [[ $last_prompt != $PROMPT ]]; then
@@ -71,10 +77,6 @@ refresh_prompt_callback() {
     esac
 }
 
-# Start gitstatusd instance with name "MY". The same name is passed to
-# gitstatus_query in gitstatus_prompt_update. The flags with -1 as values
-# enable staged, unstaged, conflicted and untracked counters.
-gitstatus_stop 'MY' && gitstatus_start -s -1 -u -1 -c -1 -d -1 'MY'
 
 prompt_precmd() {
     local rc="$?"
@@ -89,14 +91,22 @@ prompt_precmd() {
     fi
 
     RPROMPT=$(echo -n "$gray$(date +"%1e/%1m %H:%M")$reset")
-    PROMPT=$(echo -n "$(source_bash $BASE/prompt zsh 0 1 "")")
+    PROMPT=$(echo -n "$($BASE/prompt zsh 0 1 "")")
     refresh "$rc" "$timer_show"
 }
 
-if ! typeset -f async_job > /dev/null; then
-    echo "error: fancy-prompt requires zsh-async"
+if ! typeset -f gitstatus_start > /dev/null; then
+  if ! typeset -f async_job > /dev/null; then
+    echo "error: fancy-prompt requires zsh-async or gitstatusd"
+    return
+  fi
 else
-    add-zsh-hook preexec cmd_timer_preexec
-    add-zsh-hook precmd  prompt_precmd
+  # Start gitstatusd instance with name "MY". The same name is passed to
+  # gitstatus_query in gitstatus_prompt_update. The flags with -1 as values
+  # enable staged, unstaged, conflicted and untracked counters.
+  gitstatus_stop 'MY' && gitstatus_start -s -1 -u -1 -c -1 -d -1 'MY'
 fi
+
+add-zsh-hook preexec cmd_timer_preexec
+add-zsh-hook precmd  prompt_precmd
 
