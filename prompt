@@ -459,7 +459,8 @@ fi
 
 
 if [[ $VCS_STATUS_WORKDIR != "" ]]; then
-    dir=$(basename "$VCS_STATUS_WORKDIR")
+    dir=$(basename "$VCS_STATUS_WORKDIR")/$(git rev-parse --show-prefix)
+    dir=${dir%?}  # Remove last /
 elif in_git; then
     dir=$(basename "$(git rev-parse --show-toplevel)")/$(git rev-parse --show-prefix)
     dir=${dir%?}  # Remove last /
