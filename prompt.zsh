@@ -30,7 +30,7 @@ update_prompt() {
 refresh() {
     local rc="$1" timer_show="$2"
 
-    if type gitstatus_query &>/dev/null; then
+    if [[ -v FANCY_PROMPT_USE_GITSTATUS ]]; then
         gitstatus_query -t 0 -c "update_prompt '$rc' '$timer_show'" 'MY'
     else
         async_stop_worker       gitprompt
@@ -95,16 +95,18 @@ prompt_precmd() {
     refresh "$rc" "$timer_show"
 }
 
-if ! typeset -f gitstatus_start > /dev/null; then
-  if ! typeset -f async_job > /dev/null; then
-    echo "error: fancy-prompt requires zsh-async or gitstatusd"
-    return
-  fi
-else
-  # Start gitstatusd instance with name "MY". The same name is passed to
-  # gitstatus_query in gitstatus_prompt_update. The flags with -1 as values
-  # enable staged, unstaged, conflicted and untracked counters.
-  gitstatus_stop 'MY' && gitstatus_start -s -1 -u -1 -c -1 -d -1 'MY'
+if [[ -v FANCY_PROMPT_USE_GITSTATUS ]]; then
+    if ! typeset -f gitstatus_start > /dev/null; then
+        if ! typeset -f async_job > /dev/null; then
+            echo "error: fancy-prompt requires zsh-async or gitstatusd"
+            return
+        fi
+    else
+        # Start gitstatusd instance with name "MY". The same name is passed to
+        # gitstatus_query in gitstatus_prompt_update. The flags with -1 as values
+        # enable staged, unstaged, conflicted and untracked counters.
+        gitstatus_stop 'MY' && gitstatus_start -s -1 -u -1 -c -1 -d -1 'MY'
+    fi
 fi
 
 add-zsh-hook preexec cmd_timer_preexec
