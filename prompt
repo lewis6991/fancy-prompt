@@ -270,7 +270,9 @@ set_git_info() {
         error=$(check_error "$?" "4")
 
         if [ "$error" == "" ]; then
-            STASHES=$(git stash list | wc -l)
+            # # MacOS can add leading whitespace in wc output so pass through tr
+            # STASHES=$(git stash list | wc -l | tr -d ' ')
+            STASHES=$(git rev-list --walk-reflogs --count refs/stash)
 
             set_git_local_branches
 
