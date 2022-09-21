@@ -187,7 +187,7 @@ parse_porcelain_info() {
 
         while IFS= read -r line ; do
             if [[ $line =~ ^[MRC][\ MD] ]]; then ((STAGED_CHANGED   ++)); fi
-            if [[ $line =~ ^A[\ MD]     ]]; then ((INDEX_NEW        ++)); fi
+            if [[ $line =~ ^A[\ MD]     ]]; then ((STAGED_ADDED     ++)); fi
             if [[ $line =~ ^D\          ]]; then ((STAGED_DELETED   ++)); fi
             if [[ $line =~ ^[\ MARC]D   ]]; then ((UNSTAGED_DELETED ++)); fi
             if [[ $line =~ ^[\ MARC]M   ]]; then ((UNSTAGED_CHANGED ++)); fi
