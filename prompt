@@ -192,8 +192,9 @@ parse_porcelain_info() {
             if [[ $line =~ ^[\ MARC]D   ]]; then ((UNSTAGED_DELETED ++)); fi
             if [[ $line =~ ^[\ MARC]M   ]]; then ((UNSTAGED_CHANGED ++)); fi
             if [[ $line =~ ^[?][?]      ]]; then ((UNTRACKED        ++)); fi
-            if [[ $line =~ ^[DU][DU]    ]]; then ((CONFLICTS        ++)); fi
-            if [[ $line =~ ^[AU][AU]    ]]; then ((CONFLICTS        ++)); fi
+            if [[ $line =~ ^[DU][DU] ]] || [[ $line =~ ^[AU][AU]    ]]; then
+                ((CONFLICTS++));
+            fi
             # DD  unmerged, both deleted
             # AU  unmerged, added by us
             # UD  unmerged, deleted by them
@@ -383,6 +384,12 @@ get_prompt_arrow() {
     echo "$ret_colour$arrow$end"
 }
 
+tmux_rename() {
+    local tmux_target_win
+    tmux_target_win="$(tmux display-message -p '#I')"
+    tmux rename-window -t "$tmux_target_win" "$1"
+}
+
 #-------------------------------------------------------------------------------
 # Configuration
 #-------------------------------------------------------------------------------
@@ -511,6 +518,19 @@ if [[ $CMD_TIME ]] && ! [[ $CMD_TIME == 0* ]]; then
 fi
 
 prompt_end="$(get_prompt_arrow) "
+
+if in_git; then
+    if [[ $CHECKOUT != "" ]]; then
+        name="$(git rev-parse --show-toplevel | xargs basename)"
+        if [[ $TMUX ]]; then
+            tmux_rename "$name#[fg=colour8][$CHECKOUT]"
+        fi
+    fi
+else
+    if [[ $TMUX ]]; then
+        tmux_rename "$(basename "$(pwd)")"
+    fi
+fi
 
 if var_enabled "$FANCY_PROMPT_DOUBLE_LINE"; then
     printf "%s" "$prompt_time\\n"

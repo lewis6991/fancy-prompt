@@ -90,7 +90,7 @@ prompt_precmd() {
         unset prompt_timer
     fi
 
-    RPROMPT=$(echo -n "$gray$(date +"%1e/%1m %H:%M")$reset")
+    # RPROMPT=$(echo -n "$gray$(date +"%1e/%1m %H:%M")$reset")
     PROMPT=$(echo -n "$($BASE/prompt zsh 0 1 "")")
     refresh "$rc" "$timer_show"
 }
