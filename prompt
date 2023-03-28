@@ -140,11 +140,31 @@ set_git_checkout() {
     # shellcheck disable=2207
     declare -a rp=($(git rev-parse --abbrev-ref HEAD --git-dir '@{u}'))
 
-    CHECKOUT="${rp[0]}"
+    local checkout=${rp[0]}
 
-    local git_dir="${rp[1]}"
-    local remote_full="${rp[2]}"
-    local remote_abbr="${remote_full#*/}"
+    local remote; remote=$(git config --get branch."$checkout".remote)
+    local upstream; upstream=$(git config --get branch."$checkout".upstream)
+
+    if [[ $upstream != "" ]]; then
+        local ucheckout=$checkout
+        local upstream_arr=(${upstream//./ })
+        if [[ ${#upstream_arr[@]} > 1 ]] ; then
+            ucheckout=${upstream_arr[1]}
+            upstream=${upstream_arr[0]}
+        fi
+        if [[ $remote != "$upstream" ]]; then
+            read -ra AB <<< "$(git rev-list --left-right --count "$upstream"/"$ucheckout"...HEAD)"
+            CHECKOUT_UPSTREAM="$upstream/$ucheckout"
+            COMMITS_BEHIND_UPSTREAM=${AB[0]}
+            COMMITS_AHEAD_UPSTREAM=${AB[1]}
+        fi
+    fi
+
+    local git_dir=${rp[1]}
+    local remote_full=${rp[2]}
+    local push_branch=${remote_full#*/}  # upstream/main -> main
+
+    CHECKOUT=$checkout
 
     if [[ "$CHECKOUT" =~ HEAD ]]; then
         local tag
@@ -164,9 +184,9 @@ set_git_checkout() {
         fi
     fi
 
-    if [ -n "$remote_abbr" ]; then
-        if [ "$CHECKOUT" != "$remote_abbr" ]; then
-            CHECKOUT="$CHECKOUT->$remote_abbr"
+    if [ -n "$push_branch" ]; then
+        if [ "$CHECKOUT" != "$push_branch" ]; then
+            CHECKOUT="$CHECKOUT->$push_branch"
         fi
     elif [[ $CHECKOUT_IS_TAG != 1 ]]; then
         CHECKOUT="$CHECKOUT!"
@@ -344,20 +364,27 @@ get_scm_prompt() {
         # 穀 者 視  
 
         src_ctrl+=$(build_section "$gray"   "$co_sym" "$CHECKOUT"        )
-        src_ctrl+=$(build_section " $white"   ↑        "$COMMITS_AHEAD"   )
-        src_ctrl+=$(build_section " $white"   ↓        "$COMMITS_BEHIND"  )
-        src_ctrl+=$(build_section " $white"           "$SUBMODULE_UNINIT")
-        src_ctrl+=$(build_section " $red"             "$SUBMODULE_UNSYNC")
-        src_ctrl+=$(build_section " $green"   ●        "$STAGED_CHANGED"  )
-        src_ctrl+=$(build_section " $green"   +        "$STAGED_ADDED"    )
-        src_ctrl+=$(build_section " $green"   -        "$STAGED_DELETED"  )
-        src_ctrl+=$(build_section " $red"     ✖        "$CONFLICTS"       )
-        src_ctrl+=$(build_section " $red"     +        "$UNSTAGED_CHANGED")
-        src_ctrl+=$(build_section " $red"     -        "$UNSTAGED_DELETED")
+        src_ctrl+=$(build_section " $white"   ↑       "$COMMITS_AHEAD"   )
+        src_ctrl+=$(build_section " $white"   ↓       "$COMMITS_BEHIND"  )
+        if [[ $CHECKOUT_UPSTREAM != "" ]]; then
+            src_ctrl+=" $gray("
+            src_ctrl+=$(build_section "$gray"   "$co_sym" "$CHECKOUT_UPSTREAM"        )
+            src_ctrl+=$(build_section " $white"   ↑       "$COMMITS_AHEAD_UPSTREAM"   )
+            src_ctrl+=$(build_section " $white"   ↓       "$COMMITS_BEHIND_UPSTREAM"  )
+            src_ctrl+="$gray)"
+        fi
+        src_ctrl+=$(build_section " $white"          "$SUBMODULE_UNINIT")
+        src_ctrl+=$(build_section " $red"            "$SUBMODULE_UNSYNC")
+        src_ctrl+=$(build_section " $green"   ●       "$STAGED_CHANGED"  )
+        src_ctrl+=$(build_section " $green"   +       "$STAGED_ADDED"    )
+        src_ctrl+=$(build_section " $green"   -       "$STAGED_DELETED"  )
+        src_ctrl+=$(build_section " $red"     ✖       "$CONFLICTS"       )
+        src_ctrl+=$(build_section " $red"     +       "$UNSTAGED_CHANGED")
+        src_ctrl+=$(build_section " $red"     -       "$UNSTAGED_DELETED")
         # src_ctrl+=$(build_section " $magenta" +        "$UNTRACKED"       )
-        src_ctrl+=$(build_section " $magenta" …        "$UNTRACKED"       )
-        src_ctrl+=$(build_section " $red"     ⚑        "$STASHES"         )
-        src_ctrl+=$(build_section " $yellow"          "$LOCAL_BRANCHES"  )
+        src_ctrl+=$(build_section " $magenta" …       "$UNTRACKED"       )
+        src_ctrl+=$(build_section " $red"     ⚑       "$STASHES"         )
+        src_ctrl+=$(build_section " $yellow"         "$LOCAL_BRANCHES"  )
     else
         src_ctrl+="$red$error"
     fi
