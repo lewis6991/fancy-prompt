@@ -152,7 +152,7 @@ set_git_checkout() {
             ucheckout=${upstream_arr[1]}
             upstream=${upstream_arr[0]}
         fi
-        if [[ $remote != "$upstream" ]]; then
+        if [[ "$remote/$checkout" != "$upstream/$ucheckout" ]]; then
             read -ra AB <<< "$(git rev-list --left-right --count "$upstream"/"$ucheckout"...HEAD)"
             CHECKOUT_UPSTREAM="$upstream/$ucheckout"
             COMMITS_BEHIND_UPSTREAM=${AB[0]}
