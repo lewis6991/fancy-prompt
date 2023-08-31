@@ -148,7 +148,7 @@ set_git_checkout() {
     if [[ $upstream != "" ]]; then
         local ucheckout=$checkout
         local upstream_arr=(${upstream//./ })
-        if [[ ${#upstream_arr[@]} > 1 ]] ; then
+        if [[ ${#upstream_arr[@]} -gt 1 ]] ; then
             ucheckout=${upstream_arr[1]}
             upstream=${upstream_arr[0]}
         fi
@@ -163,6 +163,11 @@ set_git_checkout() {
     local git_dir=${rp[1]}
     local remote_full=${rp[2]}
     local push_branch=${remote_full#*/}  # upstream/main -> main
+
+    if [[ $push_branch == "" ]]; then
+        local merge; merge=$(git config --get branch."$checkout".merge)
+        push_branch="$remote/$merge"
+    fi
 
     CHECKOUT=$checkout
 
@@ -524,10 +529,10 @@ else
 fi
 
 convertsecs() {
-    ((d=${1}/86400))
-    ((h=(${1}/3600)%24))
-    ((m=(${1}/60)%60))
-    ((s=${1}%60))
+    d=$((${1} / 86400))
+    h=$((${1} / 3600))
+    m=$((${1} % 3600 / 60))
+    s=$((${1} % 60))
     if ((d!=0)); then
         printf "%dd %dh %dm %ds" "$d" "$h" "$m" "$s"
     elif ((h!=0)); then
