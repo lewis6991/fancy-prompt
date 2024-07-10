@@ -69,14 +69,6 @@ check_error() {
     fi
 }
 
-in_git() {
-    if [[ "$VCS_STATUS_RESULT" != "" ]]; then
-        [[ "$VCS_STATUS_RESULT" =~ ^ok ]]
-    else
-        [[ $(git rev-parse --is-inside-work-tree 2> /dev/null) = "true" ]]
-    fi
-}
-
 in_svn() {
     svn ls --depth empty > /dev/null 2>&1
     return $?
@@ -247,31 +239,6 @@ set_git_local_branches() {
     else
         LOCAL_BRANCHES=$(git branch | grep -cv master)
     fi
-}
-
-set_gitstatus_info() {
-    STAGED_CHANGED=$VCS_STATUS_NUM_STAGED
-    STAGED_ADDED=$VCS_STATUS_NUM_STAGED_NEW
-    STAGED_DELETED=$VCS_STATUS_NUM_STAGED_DELETED
-    CONFLICTS=$VCS_STATUS_NUM_CONFLICTED
-    UNSTAGED_CHANGED=$VCS_STATUS_NUM_UNSTAGED
-    UNSTAGED_DELETED=$VCS_STATUS_NUM_UNSTAGED_DELETED
-    UNTRACKED=$VCS_STATUS_NUM_UNTRACKED
-    STASHES=$VCS_STATUS_STASHES
-    COMMITS_AHEAD=$VCS_STATUS_COMMITS_AHEAD
-    COMMITS_BEHIND=$VCS_STATUS_COMMITS_BEHIND
-
-    if [[ -n $VCS_STATUS_LOCAL_BRANCH ]]; then
-        CHECKOUT=$VCS_STATUS_LOCAL_BRANCH
-    elif [[ -n $VCS_STATUS_TAG ]]; then
-        CHECKOUT=$VCS_STATUS_TAG
-        CHECKOUT_IS_TAG=1
-    else
-        CHECKOUT=${VCS_STATUS_COMMIT[1,8]}
-    fi
-
-    set_git_submodule_info
-    set_git_local_branches
 }
 
 set_git_info() {
@@ -475,20 +442,23 @@ src_ctl_colour="$gray"
 # Source Control
 #-------------------------------------------------------------------------------
 
+ORIG_PWD=$(pwd)
 # If we a located somewhere deep in .git/.. then navigate out of it to prevent
 # the error: "fatal: This operation must be run in a work tree"
-if pwd | grep -q "\\.git"; then
-    cd "$(pwd | sed -E 's/\.git(\/.*)?//g')" || exit
+if pwd | grep -q "\\.git\(/.*\)\?$"; then
+    cd "$(pwd | sed -E 's/\.git(\/.*)?$//g')" || exit
+    IN_GITDIR=true
+else
+    IN_GITDIR=false
 fi
 
+# Return 'true' or 'false' which can be directly evaluated
+IN_GIT=$(git rev-parse --is-inside-work-tree 2> /dev/null || echo false)
+
 prompt_info=""
-if in_git; then
+if $IN_GIT; then
     if ((!NO_SCM)); then
-        if [[ "$VCS_STATUS_RESULT" != "" ]]; then
-            set_gitstatus_info
-        else
-            set_git_info
-        fi
+        set_git_info
     fi
     prompt_info=$(get_scm_prompt)
 elif in_svn; then
@@ -498,11 +468,9 @@ elif in_svn; then
     prompt_info=$(get_scm_prompt)
 fi
 
-
-if [[ $VCS_STATUS_WORKDIR != "" ]]; then
-    dir=$(basename "$VCS_STATUS_WORKDIR")/$(git rev-parse --show-prefix)
-    dir=${dir%?}  # Remove last /
-elif in_git; then
+if $IN_GITDIR; then
+    dir=$(basename "$(git rev-parse --show-toplevel)")/$(sed -E 's/.*\/(.git(\/.*)?)/\1/' <<< "$ORIG_PWD")
+elif $IN_GIT; then
     dir=$(basename "$(git rev-parse --show-toplevel)")/$(git rev-parse --show-prefix)
     dir=${dir%?}  # Remove last /
 elif [ "$SHELL" == "bash" ]; then
@@ -551,17 +519,15 @@ fi
 
 prompt_end="$(get_prompt_arrow) "
 
-if in_git; then
+if $IN_GIT; then
     if [[ $CHECKOUT != "" ]]; then
         name="$(git rev-parse --show-toplevel | xargs basename)"
         if [[ $TMUX ]]; then
             tmux_rename "$name#[fg=colour8][$CHECKOUT]"
         fi
     fi
-else
-    if [[ $TMUX ]]; then
-        tmux_rename "$(basename "$(pwd)")"
-    fi
+elif [[ $TMUX ]]; then
+    tmux_rename "$(basename "$ORIG_PWD")"
 fi
 
 if var_enabled "$FANCY_PROMPT_DOUBLE_LINE"; then
