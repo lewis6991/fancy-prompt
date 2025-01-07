@@ -3,7 +3,7 @@ cmd_timer_preexec() {
 }
 
 # Try to lower the priority of the worker so that disk heavy operations
-# like `git status` has less impact on the system responsivity.
+# like `git status` has less impact on the system responsiveness.
 prompt_async_renice() {
     if command -v renice >/dev/null; then
         command renice +15 -p $$ > /dev/null
@@ -16,33 +16,28 @@ prompt_async_renice() {
 
 # The output of this is given as $3 of refresh_prompt_callback (the callback)
 update_prompt_sub() {
-    local rc="$1" timer_show="$2"
+    local rc="$1"
+    local timer_show="$2"
     $BASE/prompt zsh "$rc" 0 "$timer_show"
 }
 
-update_prompt() {
-    local rc="$1" timer_show="$2"
-    PROMPT=$(echo -n \
-      "$(eval $(typeset -m 'VCS*') $BASE/prompt zsh "$rc" 0 "$timer_show")")
-    zle .reset-prompt
-}
-
 refresh() {
-    local rc="$1" timer_show="$2"
+    local rc="$1"
+    local timer_show="$2"
 
-    if [[ -v FANCY_PROMPT_USE_GITSTATUS ]]; then
-        gitstatus_query -t 0 -c "update_prompt '$rc' '$timer_show'" 'MY'
-    else
-        async_stop_worker       gitprompt
-        async_start_worker      gitprompt -z
-        async_register_callback gitprompt refresh_prompt_callback
-        async_worker_eval       gitprompt prompt_async_renice
-        async_job               gitprompt update_prompt_sub "$rc" "$timer_show"
-    fi
+    async_stop_worker       gitprompt
+    async_start_worker      gitprompt -z
+    async_register_callback gitprompt refresh_prompt_callback
+    async_worker_eval       gitprompt prompt_async_renice
+    async_job               gitprompt update_prompt_sub "$rc" "$timer_show"
 }
 
 refresh_prompt_callback() {
-    local job="$1" err="$2" output="$3" outerr="$5" next_pending="$6"
+    local job="$1"
+    local err="$2"
+    local output="$3"
+    local outerr="$5"
+    local next_pending="$6"
 
     if (( next_pending )); then
         return
@@ -77,12 +72,9 @@ refresh_prompt_callback() {
     esac
 }
 
-
 prompt_precmd() {
     local rc="$?"
     local timer_show
-    local gray='%{\e[0;90m%}'
-    local reset='%{\e[0m%}'
 
     if (( prompt_timer )); then
         timer_show=$((SECONDS - prompt_timer))
@@ -90,25 +82,9 @@ prompt_precmd() {
         unset prompt_timer
     fi
 
-    # RPROMPT=$(echo -n "$gray$(date +"%1e/%1m %H:%M")$reset")
     PROMPT=$(echo -n "$($BASE/prompt zsh 0 1 "")")
     refresh "$rc" "$timer_show"
 }
 
-if [[ -v FANCY_PROMPT_USE_GITSTATUS ]]; then
-    if ! typeset -f gitstatus_start > /dev/null; then
-        if ! typeset -f async_job > /dev/null; then
-            echo "error: fancy-prompt requires zsh-async or gitstatusd"
-            return
-        fi
-    else
-        # Start gitstatusd instance with name "MY". The same name is passed to
-        # gitstatus_query in gitstatus_prompt_update. The flags with -1 as values
-        # enable staged, unstaged, conflicted and untracked counters.
-        gitstatus_stop 'MY' && gitstatus_start -s -1 -u -1 -c -1 -d -1 'MY'
-    fi
-fi
-
 add-zsh-hook preexec cmd_timer_preexec
 add-zsh-hook precmd  prompt_precmd
-

@@ -1,10 +1,10 @@
 # Features
 
 * Provides a nice colourful prompt.
-* Gives you basic information about your git or svn checkout.
+* Gives you basic information about your git checkout.
 * Supports bash, csh and tcsh.
 * Asynchronous! (zsh only)
-* Integrates with [gitstatus](https://github.com/romkatv/gitstatus] (zsh only)
+* Github notification count
 
 # Screenshot
 
@@ -21,7 +21,6 @@ Requires mafredri/zsh-async.
 Add the following to your `.zimrc`:
 
 ```zsh
-zmodule romkatv/gitstatus  # optional
 zmodule mafredri/zsh-async --name async
 zmodule lewis6991/fancy-prompt
 ```
@@ -50,8 +49,8 @@ Add the following to your `.bashrc`:
 export PROMPT_COMMAND=__prompt_command
 
 function __prompt_command() {
-    EXIT=$?
-    PS1=`~/.prompt bash ${EXIT}`
+    local exit_code=$?
+    PS1=$(~/.prompt bash $exit_code)
 }
 ```
 
@@ -73,12 +72,6 @@ alias precmd 'set prompt="`~/.prompt csh $?`"'
 FANCY_PROMPT_TIMEOUT=3
 ```
 Timeout for commands fetching SCM updates.
-
-### Dynamic Width
-```bash
-FANCY_PROMPT_DYNAMIC_WIDTH=1
-```
-Shorten the prompt for narrow terminal windows.
 
 ### Symbols
 ```bash
