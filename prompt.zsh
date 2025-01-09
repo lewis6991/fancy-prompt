@@ -1,10 +1,21 @@
-cmd_timer_preexec() {
+fcp_set_prompt() {
+    last_prompt="$PROMPT"
+    PROMPT="$(echo -n $1)"
+    if [[ $last_prompt != $PROMPT ]] && zle ; then
+        zle reset-prompt
+    fi
+}
+
+fcp_cmd_timer_preexec() {
+    local OSC133_EXEC="\e]133;C\e\\"
+    # Omit OSC133 command executed
+    print -n "$OSC133_EXEC"
     prompt_timer=${prompt_timer:-$SECONDS}
 }
 
 # Try to lower the priority of the worker so that disk heavy operations
 # like `git status` has less impact on the system responsiveness.
-prompt_async_renice() {
+fcp_prompt_async_renice() {
     if command -v renice >/dev/null; then
         command renice +15 -p $$ > /dev/null
     fi
@@ -15,24 +26,24 @@ prompt_async_renice() {
 }
 
 # The output of this is given as $3 of refresh_prompt_callback (the callback)
-update_prompt_sub() {
+fcp_update_prompt_sub() {
     local rc="$1"
     local timer_show="$2"
     $BASE/prompt zsh "$rc" 0 "$timer_show"
 }
 
-refresh() {
+fcp_refresh() {
     local rc="$1"
     local timer_show="$2"
 
     async_stop_worker       gitprompt
     async_start_worker      gitprompt -z
-    async_register_callback gitprompt refresh_prompt_callback
-    async_worker_eval       gitprompt prompt_async_renice
-    async_job               gitprompt update_prompt_sub "$rc" "$timer_show"
+    async_register_callback gitprompt fcp_refresh_prompt_callback
+    async_worker_eval       gitprompt fcp_prompt_async_renice
+    async_job               gitprompt fcp_update_prompt_sub "$rc" "$timer_show"
 }
 
-refresh_prompt_callback() {
+fcp_refresh_prompt_callback() {
     local job="$1"
     local err="$2"
     local output="$3"
@@ -51,7 +62,7 @@ refresh_prompt_callback() {
                 # ZLE watcher detected an error on the worker fd.
                 # Triggered when used with marlonrichert/zsh-autocomplete
                 # echo "ERROR 46 ($err): $outerr"
-                refresh 0 0
+                fcp_refresh 0 0
             else
                 echo "ERROR 47 ($err): $outerr"
             fi
@@ -62,17 +73,13 @@ refresh_prompt_callback() {
                 echo "ERROR 45 ($err): $outerr"
             fi
             ;;
-        update_prompt_sub)
-            last_prompt="$PROMPT"
-            PROMPT="$(echo -n $output)"
-            if [[ $last_prompt != $PROMPT ]]; then
-                zle .reset-prompt
-            fi
+        fcp_update_prompt_sub)
+            fcp_set_prompt "$output"
             ;;
     esac
 }
 
-prompt_precmd() {
+fcp_prompt_precmd() {
     local rc="$?"
     local timer_show
 
@@ -82,9 +89,9 @@ prompt_precmd() {
         unset prompt_timer
     fi
 
-    PROMPT=$(echo -n "$($BASE/prompt zsh 0 1 "")")
-    refresh "$rc" "$timer_show"
+    fcp_set_prompt "$($BASE/prompt zsh 0 1 "")"
+    fcp_refresh "$rc" "$timer_show"
 }
 
-add-zsh-hook preexec cmd_timer_preexec
-add-zsh-hook precmd  prompt_precmd
+add-zsh-hook preexec fcp_cmd_timer_preexec
+add-zsh-hook precmd  fcp_prompt_precmd
