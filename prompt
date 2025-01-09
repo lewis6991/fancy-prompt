@@ -399,7 +399,8 @@ ORIG_PWD=$(pwd)
 # If we a located somewhere deep in .git/.. then navigate out of it to prevent
 # the error: "fatal: This operation must be run in a work tree"
 if pwd | grep -q "\\.git\(/.*\)\?$"; then
-    cd "$(pwd | sed -E 's/\.git(\/.*)?$//g')" || exit
+    IN_BARE_GITDIR=$(git rev-parse --is-bare-repository)
+    cd "$(pwd | sed -E 's%[^/]*\.git(\/.*)?$%%g')" || exit
     IN_GITDIR=true
 else
     IN_GITDIR=false
@@ -423,8 +424,10 @@ if ((!FAST)) && check_command gh && check_command jq; then
     fi
 fi
 
-if $IN_GITDIR; then
-    dir=$(basename "$(git rev-parse --show-toplevel)")/$(sed -E 's/.*\/(.git(\/.*)?)/\1/' <<< "$ORIG_PWD")
+if $IN_BARE_GITDIR; then
+    dir=$(basename $ORIG_PWD)
+elif $IN_GITDIR; then
+    dir=$(basename "$(git rev-parse --show-toplevel)")/$(sed -E 's/.*\/([^/]*\.git(\/.*)?)/\1/' <<< "$ORIG_PWD")
 elif $IN_GIT; then
     dir=$(basename "$(git rev-parse --show-toplevel)")/$(git rev-parse --show-prefix)
     dir=${dir%?}  # Remove last /
