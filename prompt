@@ -4,10 +4,6 @@
 # Author      : Lewis Russell
 # Description : Very useful zsh/csh/tcsh/bash prompt for seamless use with Git
 #-------------------------------------------------------------------------------
-
-#-------------------------------------------------------------------------------
-# Arguments
-#-------------------------------------------------------------------------------
 SHELL="$1"
 RET_CODE="$2"
 FAST="$3"
@@ -35,6 +31,41 @@ STASHES=""
 SUBMODULE_UNSYNC=""
 SUBMODULE_UNINIT=""
 LOCAL_BRANCHES=""
+
+#-------------------------------------------------------------------------------
+# Attributes, Colours & Constants
+#-------------------------------------------------------------------------------
+if [ "$SHELL" == "bash" ]; then
+    C_START='\['
+    C_END='\]'
+    P_USER='\u'
+    P_HOST='\H'
+else # csh, tcsh and zsh
+    C_START='%{'
+    C_END='%}'
+    P_USER='%n'
+    P_HOST='%m'
+fi
+
+# reverse="${c_start}\\e[3;35m${c_end}"
+# underlined="${c_start}\\e[4;35m${c_end}"
+# dim="${c_start}\\e[10;35m${c_end}"
+GRAY="$C_START\\e[0;90m$C_END"
+RED="$C_START\\e[0;31m$C_END"
+GREEN="$C_START\\e[0;32m$C_END"
+YELLOW="$C_START\\e[0;33m$C_END"
+BLUE="$C_START\\e[0;34m$C_END"
+MAGENTA="$C_START\\e[0;35m$C_END"
+CYAN="$C_START\\e[0;36m$C_END"
+WHITE="$C_START\\e[0;37m$C_END"
+END="$C_START\\e[0m$C_END" # This is needed at the end.
+
+# Emit an OSC-133;A sequence before each prompt.
+if [ "$SHELL" == "zsh" ]; then
+    OSC133_START="\e]133;A\e\\"
+else
+    OSC133_START=""
+fi
 
 #-------------------------------------------------------------------------------
 # Configuration
@@ -126,8 +157,8 @@ set_git_checkout() {
 
     local checkout=${rp[0]}
 
-    local remote=$(git config --get branch."$checkout".remote)
-    local upstream=$(git config --get branch."$checkout".upstream)
+    local remote; remote=$(git config --get branch."$checkout".remote || true)
+    local upstream; upstream=$(git config --get branch."$checkout".upstream || true)
 
     if [[ $upstream != "" ]]; then
         local ucheckout=$checkout
@@ -185,36 +216,40 @@ set_git_checkout() {
 parse_porcelain_info() {
     local porcelain_info=$1
     # porcelain info should be common between git
-    if [ "$porcelain_info" != "?" ]; then
-        STAGED_CHANGED=0
-        STAGED_ADDED=0
-        STAGED_DELETED=0
-        UNSTAGED_DELETED=0
-        UNSTAGED_CHANGED=0
-        UNTRACKED=0
-        CONFLICTS=0
+    if [ "$porcelain_info" == "?" ]; then
+        return
+    fi
 
-        while IFS= read -r line ; do
-            if [[ $line =~ ^[MTRC][\ MD] ]]; then ((STAGED_CHANGED   ++)); fi
-            if [[ $line =~ ^A[\ MD]      ]]; then ((STAGED_ADDED     ++)); fi
-            if [[ $line =~ ^D\           ]]; then ((STAGED_DELETED   ++)); fi
-            if [[ $line =~ ^[\ MARC]D    ]]; then ((UNSTAGED_DELETED ++)); fi
-            if [[ $line =~ ^[\ MARC]M    ]]; then ((UNSTAGED_CHANGED ++)); fi
-            if [[ $line =~ ^[?][?]       ]]; then ((UNTRACKED        ++)); fi
-            if [[ $line =~ ^[DU][DU] ]] || [[ $line =~ ^[AU][AU]    ]]; then
-                ((CONFLICTS++));
-            fi
+    STAGED_CHANGED=0
+    STAGED_ADDED=0
+    STAGED_DELETED=0
+    UNSTAGED_DELETED=0
+    UNSTAGED_CHANGED=0
+    UNTRACKED=0
+    CONFLICTS=0
+
+    while IFS= read -r line ; do
+        case "$line" in
+            [MTRC][\ MD]*) ((STAGED_CHANGED++)) ;;
+            A[\ MD]*)      ((STAGED_ADDED++)) ;;
+            D\ *)          ((STAGED_DELETED++)) ;;
+            [\ MARC]D*)    ((UNSTAGED_DELETED++)) ;;
+            [\ MARC]M*)    ((UNSTAGED_CHANGED++)) ;;
+            [?][?]*)         ((UNTRACKED++)) ;;
             # DD  unmerged, both deleted
-            # AU  unmerged, added by us
             # UD  unmerged, deleted by them
-            # UA  unmerged, added by them
             # DU  unmerged, deleted by us
+            [DU][DU]*)     ((CONFLICTS++)) ;;
+
+            # AU  unmerged, added by us
+            # UA  unmerged, added by them
             # AA  unmerged, both added
             # UU  unmerged, both modified
-        done <<< "$porcelain_info"
-    fi
+            [AU][AU]*)     ((CONFLICTS++)) ;;
+            *)             ;;
+        esac || true
+    done <<< "$porcelain_info"
 }
-
 
 get_local_branches() {
     # Local branches that do not have an upstream of the same name
@@ -227,9 +262,9 @@ get_local_branches() {
 
 get_git_info() {
     if git_vercomp "1.7.2"; then
-        timeout "$TIMEOUT2" git status --untracked-files=normal --branch --porcelain "$GIT_STATUS_OPTS"
+        timeout "$TIMEOUT" git status --untracked-files=normal --branch --porcelain --ignore-submodules
     else
-        timeout "$TIMEOUT2" git status --untracked-files=normal --porcelain
+        timeout "$TIMEOUT" git status --untracked-files=normal --porcelain
     fi
 }
 
@@ -243,7 +278,7 @@ set_git_info() {
     parse_porcelain_info "$info"
 
     local submodule_info
-    submodule_info=$(timeout "$TIMEOUT2" git submodule status --recursive 2> /dev/null)
+    submodule_info=$(timeout "$TIMEOUT" git submodule status --recursive 2> /dev/null)
     if [ "$submodule_info" != "" ]; then
         SUBMODULE_UNSYNC=$(grep -cE '^\+' <<< "$submodule_info")
         SUBMODULE_UNINIT=$(grep -cE '^-'  <<< "$submodule_info")
@@ -266,7 +301,7 @@ set_git_info() {
 
     # # MacOS can add leading whitespace in wc output so pass through tr
     # STASHES=$(git stash list | wc -l | tr -d ' ')
-    STASHES=$(git rev-list --walk-reflogs --count refs/stash)
+    STASHES=$(git rev-list --walk-reflogs --ignore-missing --count refs/stash)
 
     # Local branches that do not have an upstream of the same name
     LOCAL_BRANCHES=$(get_local_branches)
@@ -285,7 +320,7 @@ build_section() {
 
 get_scm_prompt() {
     if [[ $CHECKOUT == "" ]]; then
-        printf "%s" "$src_ctl_colour...$src_ctl_colour"
+        printf "%s" "$GRAY...$GRAY"
         return
     fi
 
@@ -300,175 +335,136 @@ get_scm_prompt() {
         fi
     fi
 
-    src_ctrl+=$(build_section "$gray"   "$co_sym" "$CHECKOUT"      )
-    src_ctrl+=$(build_section " $white"   ↑       "$COMMITS_AHEAD" )
-    src_ctrl+=$(build_section " $white"   ↓       "$COMMITS_BEHIND")
+    src_ctrl+=$(build_section "$GRAY"   "$co_sym" "$CHECKOUT"      )
+    src_ctrl+=$(build_section " $WHITE"   ↑       "$COMMITS_AHEAD" )
+    src_ctrl+=$(build_section " $WHITE"   ↓       "$COMMITS_BEHIND")
     if [[ $CHECKOUT_UPSTREAM != "" ]]; then
-        src_ctrl+=" $gray("
-        src_ctrl+=$(build_section "$gray"   "$co_sym" "$CHECKOUT_UPSTREAM"      )
-        src_ctrl+=$(build_section " $white"   ↑       "$COMMITS_AHEAD_UPSTREAM" )
-        src_ctrl+=$(build_section " $white"   ↓       "$COMMITS_BEHIND_UPSTREAM")
-        src_ctrl+="$gray)"
+        src_ctrl+=" $GRAY("
+        src_ctrl+=$(build_section "$GRAY"   "$co_sym" "$CHECKOUT_UPSTREAM"      )
+        src_ctrl+=$(build_section " $WHITE"   ↑       "$COMMITS_AHEAD_UPSTREAM" )
+        src_ctrl+=$(build_section " $WHITE"   ↓       "$COMMITS_BEHIND_UPSTREAM")
+        src_ctrl+="$GRAY)"
     fi
-    src_ctrl+=$(build_section " $white"          "$SUBMODULE_UNINIT")
-    src_ctrl+=$(build_section " $red"            "$SUBMODULE_UNSYNC")
-    src_ctrl+=$(build_section " $green"   ●       "$STAGED_CHANGED"  )
-    src_ctrl+=$(build_section " $green"   +       "$STAGED_ADDED"    )
-    src_ctrl+=$(build_section " $green"   -       "$STAGED_DELETED"  )
-    src_ctrl+=$(build_section " $red"     ✖       "$CONFLICTS"       )
-    src_ctrl+=$(build_section " $red"     +       "$UNSTAGED_CHANGED")
-    src_ctrl+=$(build_section " $red"     -       "$UNSTAGED_DELETED")
+    src_ctrl+=$(build_section " $WHITE"          "$SUBMODULE_UNINIT")
+    src_ctrl+=$(build_section " $RED"            "$SUBMODULE_UNSYNC")
+    src_ctrl+=$(build_section " $GREEN"   ●       "$STAGED_CHANGED"  )
+    src_ctrl+=$(build_section " $GREEN"   +       "$STAGED_ADDED"    )
+    src_ctrl+=$(build_section " $GREEN"   -       "$STAGED_DELETED"  )
+    src_ctrl+=$(build_section " $RED"     ✖       "$CONFLICTS"       )
+    src_ctrl+=$(build_section " $RED"     +       "$UNSTAGED_CHANGED")
+    src_ctrl+=$(build_section " $RED"     -       "$UNSTAGED_DELETED")
     # src_ctrl+=$(build_section " $magenta" +        "$UNTRACKED"       )
-    src_ctrl+=$(build_section " $magenta" …       "$UNTRACKED"       )
-    src_ctrl+=$(build_section " $red"     ⚑       "$STASHES"         )
-    src_ctrl+=$(build_section " $yellow"         "$LOCAL_BRANCHES"  )
+    src_ctrl+=$(build_section " $MAGENTA" …       "$UNTRACKED"       )
+    src_ctrl+=$(build_section " $RED"     ⚑       "$STASHES"         )
+    src_ctrl+=$(build_section " $YELLOW"         "$LOCAL_BRANCHES"  )
 
-
-    printf "%s" "$src_ctl_colour$src_ctrl$src_ctl_colour"
+    printf "%s" "$GRAY$src_ctrl$GRAY"
 }
 
 get_prompt_arrow() {
+    local ret_colour=$1
+    local arrow
     if var_enabled "$FANCY_PROMPT_USE_SYMBOLS"; then
         arrow="❯"
     else
         arrow=">"
     fi
 
-    echo "$ret_colour$arrow$end"
+    echo "$ret_colour$arrow$END"
 }
 
-# capture the target window before running set_git_info in case the user
-# switches windows before the prompt is updated.
-TMUX_TARGET_WIN="$(tmux display-message -p '#I')"
-tmux_rename() {
-    tmux rename-window -t "$TMUX_TARGET_WIN" "$1"
+toboolean() {
+    if "$@"; then
+        echo true
+    else
+        echo false
+    fi
 }
 
-#-------------------------------------------------------------------------------
-# Configuration
-#-------------------------------------------------------------------------------
-GIT_STATUS_OPTS="--ignore-submodules"
-TIMEOUT=${FANCY_PROMPT_TIMEOUT-3}
-TIMEOUT2=$((TIMEOUT*2))
+main() {
+  TIMEOUT=${FANCY_PROMPT_TIMEOUT-6}
 
-if var_enabled "$FANCY_PROMPT_USE_NERD_SYMBOLS"; then
-    FANCY_PROMPT_USE_SYMBOLS=1
-fi
+  if var_enabled "$FANCY_PROMPT_USE_NERD_SYMBOLS"; then
+      FANCY_PROMPT_USE_SYMBOLS=1
+  fi
 
-#-------------------------------------------------------------------------------
-# Attributes & Colours
-#-------------------------------------------------------------------------------
-if [ "$SHELL" == "bash" ]; then
-    c_start='\['
-    c_end='\]'
-    user='\u'
-    host='\H'
-else # csh, tcsh and zsh
-    c_start='%{'
-    c_end='%}'
-    user='%n'
-    host='%m'
-fi
+  if [[ $TMUX ]]; then
+      # capture the target window before running set_git_info in case the user
+      # switches windows before the prompt is updated.
+      TMUX_TARGET_WIN="$(tmux display-message -p '#I')"
+  fi
 
-# reverse="${c_start}\\e[3;35m${c_end}"
-# underlined="${c_start}\\e[4;35m${c_end}"
-# dim="${c_start}\\e[10;35m${c_end}"
-gray="$c_start\\e[0;90m$c_end"
-red="$c_start\\e[0;31m$c_end"
-green="$c_start\\e[0;32m$c_end"
-yellow="$c_start\\e[0;33m$c_end"
-blue="$c_start\\e[0;34m$c_end"
-magenta="$c_start\\e[0;35m$c_end"
-cyan="$c_start\\e[0;36m$c_end"
-white="$c_start\\e[0;37m$c_end"
-end="$c_start\\e[0m$c_end" # This is needed at the end.
+  #-------------------------------------------------------------------------------
+  # Source Control
+  #-------------------------------------------------------------------------------
 
-# Use a different colour for each shell.
+  local in_gitdir
+  local in_bare_gitdir
+  local orig_pwd; orig_pwd=$(pwd)
 
-case "$SHELL" in
-    bash) dir_colour="$yellow"  ;;
-    zsh)  dir_colour="$green"   ;;
-    *)    dir_colour="$magenta" ;;
-esac
+  # If we a located somewhere deep in .git/.. then navigate out of it to prevent
+  # the error: "fatal: This operation must be run in a work tree"
+  in_gitdir=$(pwd | toboolean grep -q "\\.git\(/.*\)\?$")
+  if $in_gitdir; then
+      in_bare_gitdir=$(git rev-parse --is-bare-repository)
+      cd "$(pwd | sed -E 's%[^/]*\.git(\/.*)?$%%g')" || exit
+  fi
 
-src_ctl_colour="$gray"
+  # Return 'true' or 'false' which can be directly evaluated
+  local in_git
+  in_git=$(git rev-parse --is-inside-work-tree 2> /dev/null || echo false)
 
-#-------------------------------------------------------------------------------
-# Source Control
-#-------------------------------------------------------------------------------
+  local prompt_info=""
+  if $in_git; then
+      if ((!FAST)); then
+          set_git_info
+      fi
+      prompt_info+="$(get_scm_prompt)"
+  fi
 
-ORIG_PWD=$(pwd)
-# If we a located somewhere deep in .git/.. then navigate out of it to prevent
-# the error: "fatal: This operation must be run in a work tree"
-if pwd | grep -q "\\.git\(/.*\)\?$"; then
-    IN_BARE_GITDIR=$(git rev-parse --is-bare-repository)
-    cd "$(pwd | sed -E 's%[^/]*\.git(\/.*)?$%%g')" || exit
-    IN_GITDIR=true
-else
-    IN_GITDIR=false
-fi
+  if $in_bare_gitdir; then
+      dir=$(basename $orig_pwd)
+  elif $in_gitdir; then
+      dir=$(basename "$(git rev-parse --show-toplevel)")/$(sed -E 's/.*\/([^/]*\.git(\/.*)?)/\1/' <<< "$orig_pwd")
+  elif $in_git; then
+      dir=$(basename "$(git rev-parse --show-toplevel)")/$(git rev-parse --show-prefix)
+      dir=${dir%?}  # Remove last /
+  elif [ "$SHELL" == "bash" ]; then
+      dir='\W'
+  else
+      dir='%c'
+  fi
 
-# Return 'true' or 'false' which can be directly evaluated
-IN_GIT=$(git rev-parse --is-inside-work-tree 2> /dev/null || echo false)
+  #-------------------------------------------------------------------------------
+  # Prompt
+  #-------------------------------------------------------------------------------
+  local prompt="${BLUE}${P_HOST}:${CYAN}${P_USER}:${GREEN}$dir "
 
-prompt_info=""
-if $IN_GIT; then
-    if ((!FAST)); then
-        set_git_info
-    fi
-    prompt_info+="$(get_scm_prompt)"
-fi
+  local ret_colour
+  if [ "$RET_CODE" -eq 0 ]; then
+      ret_colour="$CYAN"
+  else
+      ret_colour="$RED"
+  fi
 
-if $IN_BARE_GITDIR; then
-    dir=$(basename $ORIG_PWD)
-elif $IN_GITDIR; then
-    dir=$(basename "$(git rev-parse --show-toplevel)")/$(sed -E 's/.*\/([^/]*\.git(\/.*)?)/\1/' <<< "$ORIG_PWD")
-elif $IN_GIT; then
-    dir=$(basename "$(git rev-parse --show-toplevel)")/$(git rev-parse --show-prefix)
-    dir=${dir%?}  # Remove last /
-elif [ "$SHELL" == "bash" ]; then
-    dir='\W'
-else
-    dir='%c'
-fi
+  local prompt_time=''
+  if [[ $CMD_TIME ]] && ! [[ $CMD_TIME == 0* ]]; then
+      prompt_time="$GRAY$(convertsecs "$CMD_TIME")"
+  fi
 
-#-------------------------------------------------------------------------------
-# Prompt
-#-------------------------------------------------------------------------------
-prompt=""
-prompt+="$blue"
-prompt+="$host:"
-prompt+="$cyan"
-prompt+="$user:"
-prompt+="$dir_colour"
-prompt+="$dir "
+  if $in_git; then
+      if [[ $CHECKOUT != "" ]]; then
+          name="$(git rev-parse --show-toplevel | xargs basename)"
+          if [[ $TMUX ]]; then
+              tmux rename-window -t "$TMUX_TARGET_WIN" "$name#[fg=colour8][$CHECKOUT]"
+          fi
+      fi
+  elif [[ $TMUX ]]; then
+      tmux rename-window -t "$TMUX_TARGET_WIN" "$(basename "$orig_pwd")"
+  fi
 
-if [ "$RET_CODE" -eq 0 ]; then
-    ret_colour="$cyan"
-else
-    ret_colour="$red"
-fi
+  printf "%s\n$OSC133_START%s%s\n" "$prompt_time" "$prompt" "$prompt_info"
+  printf "%s " "$(get_prompt_arrow $ret_colour)"
+}
 
-prompt_time=''
-if [[ $CMD_TIME ]] && ! [[ $CMD_TIME == 0* ]]; then
-    prompt_time="$gray$(convertsecs "$CMD_TIME")"
-fi
-
-prompt_end="$(get_prompt_arrow) "
-
-if $IN_GIT; then
-    if [[ $CHECKOUT != "" ]]; then
-        name="$(git rev-parse --show-toplevel | xargs basename)"
-        if [[ $TMUX ]]; then
-            tmux_rename "$name#[fg=colour8][$CHECKOUT]"
-        fi
-    fi
-elif [[ $TMUX ]]; then
-    tmux_rename "$(basename "$ORIG_PWD")"
-fi
-
-# Emit an OSC-133;A sequence before each prompt.
-OSC133_START="\e]133;A\e\\"
-
-printf "%s" "$prompt_time\\n"
-printf "$OSC133_START%s" "$prompt$prompt_info\\n$prompt_end"
+main
