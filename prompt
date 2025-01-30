@@ -337,9 +337,11 @@ get_prompt_arrow() {
     echo "$ret_colour$arrow$end"
 }
 
+# capture the target window before running set_git_info in case the user
+# switches windows before the prompt is updated.
+TMUX_TARGET_WIN="$(tmux display-message -p '#I')"
 tmux_rename() {
-    local tmux_target_win="$(tmux display-message -p '#I')"
-    tmux rename-window -t "$tmux_target_win" "$1"
+    tmux rename-window -t "$TMUX_TARGET_WIN" "$1"
 }
 
 #-------------------------------------------------------------------------------
@@ -415,13 +417,6 @@ if $IN_GIT; then
         set_git_info
     fi
     prompt_info+="$(get_scm_prompt)"
-fi
-
-if ((!FAST)) && check_command gh && check_command jq; then
-    gh_notifications=$(gh api notifications | jq '. | length')
-    if ((gh_notifications > 0)); then
-        prompt_info+=" $white  $gh_notifications"
-    fi
 fi
 
 if $IN_BARE_GITDIR; then

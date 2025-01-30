@@ -4,7 +4,8 @@
 * Gives you basic information about your git checkout.
 * Supports bash, csh and tcsh.
 * Asynchronous! (zsh only)
-* Github notification count
+* Rename Tmux windows to CWD
+* OSC133 Support
 
 # Screenshot
 
