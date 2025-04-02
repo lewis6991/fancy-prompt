@@ -260,6 +260,10 @@ get_local_branches() {
     fi
 }
 
+if ! command -v timeout &> /dev/null; then
+    timeout() { perl -e 'alarm shift; exec @ARGV' "$@"; }
+fi
+
 get_git_info() {
     if git_vercomp "1.7.2"; then
         timeout "$TIMEOUT" git status --untracked-files=normal --branch --porcelain --ignore-submodules
