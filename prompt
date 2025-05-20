@@ -4,6 +4,14 @@
 # Author      : Lewis Russell
 # Description : Very useful zsh/csh/tcsh/bash prompt for seamless use with Git
 #-------------------------------------------------------------------------------
+
+# The prompt will check the git config for branch.<branch>.upstream
+# for a branch this branch aims to be merged into, e.g:
+#
+# ```
+# git config branch.mybranch.upstream upstream/main
+# ```
+
 SHELL="$1"
 RET_CODE="$2"
 FAST="$3"
@@ -157,23 +165,23 @@ set_git_checkout() {
 
     local checkout=${rp[0]}
 
-    local remote; remote=$(git config --get branch."$checkout".remote || true)
-    local upstream; upstream=$(git config --get branch."$checkout".upstream || true)
+    local remote=$(git config --get branch."$checkout".remote || true)
+    local upstream=$(git config --get branch."$checkout".upstream || true)
 
-    if [[ $upstream != "" ]]; then
-        local ucheckout=$checkout
-        local upstream_arr=(${upstream//./ })
-        if [[ ${#upstream_arr[@]} -gt 1 ]] ; then
-            ucheckout=${upstream_arr[1]}
-            upstream=${upstream_arr[0]}
-        fi
-        if [[ "$remote/$checkout" != "$upstream/$ucheckout" ]]; then
-            read -ra AB <<< "$(git rev-list --left-right --count "$upstream"/"$ucheckout"...HEAD)"
-            CHECKOUT_UPSTREAM="$upstream/$ucheckout"
-            COMMITS_BEHIND_UPSTREAM=${AB[0]}
-            COMMITS_AHEAD_UPSTREAM=${AB[1]}
+    if [[ -z $upstream ]]; then
+        local gh_resolved=$(git config --get remote.upstream.gh-resolved || true)
+        if [[ -n $gh_resolved ]]; then
+            upstream="upstream/$(git remote show upstream | sed -n '/HEAD branch/s/.*: //p')"
         fi
     fi
+
+    if [[ $upstream != "" && "$remote/$checkout" != "$upstream" ]]; then
+        read -ra AB <<< "$(git rev-list --left-right --count "$upstream"...HEAD)"
+        CHECKOUT_UPSTREAM="$upstream"
+        COMMITS_BEHIND_UPSTREAM=${AB[0]}
+        COMMITS_AHEAD_UPSTREAM=${AB[1]}
+    fi
+
 
     local git_dir=${rp[1]}
     local remote_full=${rp[2]}
