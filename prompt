@@ -237,25 +237,22 @@ parse_porcelain_info() {
     CONFLICTS=0
 
     while IFS= read -r line ; do
-        case "$line" in
-            [MTRC][\ MD]*) ((STAGED_CHANGED++)) ;;
-            A[\ MD]*)      ((STAGED_ADDED++)) ;;
-            D\ *)          ((STAGED_DELETED++)) ;;
-            [\ MARC]D*)    ((UNSTAGED_DELETED++)) ;;
-            [\ MARC]M*)    ((UNSTAGED_CHANGED++)) ;;
-            [?][?]*)         ((UNTRACKED++)) ;;
-            # DD  unmerged, both deleted
-            # UD  unmerged, deleted by them
-            # DU  unmerged, deleted by us
-            [DU][DU]*)     ((CONFLICTS++)) ;;
-
-            # AU  unmerged, added by us
-            # UA  unmerged, added by them
-            # AA  unmerged, both added
-            # UU  unmerged, both modified
-            [AU][AU]*)     ((CONFLICTS++)) ;;
-            *)             ;;
-        esac || true
+        if [[ $line =~ ^[MTRC][\ MD] ]]; then ((STAGED_CHANGED   ++)); fi
+        if [[ $line =~ ^A[\ MD]      ]]; then ((STAGED_ADDED     ++)); fi
+        if [[ $line =~ ^D\           ]]; then ((STAGED_DELETED   ++)); fi
+        if [[ $line =~ ^[\ MARC]D    ]]; then ((UNSTAGED_DELETED ++)); fi
+        if [[ $line =~ ^[\ MARC]M    ]]; then ((UNSTAGED_CHANGED ++)); fi
+        if [[ $line =~ ^[?][?]       ]]; then ((UNTRACKED        ++)); fi
+        if [[ $line =~ ^[DU][DU] ]] || [[ $line =~ ^[AU][AU]    ]]; then
+            ((CONFLICTS++));
+        fi
+        # DD  unmerged, both deleted
+        # AU  unmerged, added by us
+        # UD  unmerged, deleted by them
+        # UA  unmerged, added by them
+        # DU  unmerged, deleted by us
+        # AA  unmerged, both added
+        # UU  unmerged, both modified
     done <<< "$porcelain_info"
 }
 
