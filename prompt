@@ -161,7 +161,7 @@ set_git_checkout() {
     fi
 
     # shellcheck disable=2207
-    declare -a rp=($(git rev-parse --abbrev-ref HEAD --git-dir '@{u}'))
+    declare -a rp=($(git rev-parse --path-format=absolute --abbrev-ref HEAD --git-dir --git-common-dir '@{u}'))
 
     local checkout=${rp[0]}
 
@@ -184,7 +184,8 @@ set_git_checkout() {
 
 
     local git_dir=${rp[1]}
-    local remote_full=${rp[2]}
+    local git_common_dir=${rp[2]}
+    local remote_full=${rp[3]}
     local push_branch=${remote_full#*/}  # upstream/main -> main
 
     if [[ $push_branch == "" ]]; then
@@ -218,6 +219,10 @@ set_git_checkout() {
         fi
     elif [[ $CHECKOUT_IS_TAG != 1 ]]; then
         CHECKOUT="$CHECKOUT!"
+    fi
+
+    if [[ "$git_dir" != "$git_common_dir" ]]; then
+        CHECKOUT="[worktree]$CHECKOUT"
     fi
 }
 
