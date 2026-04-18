@@ -26,21 +26,37 @@ fcp_prompt_async_renice() {
 }
 
 # The output of this is given as $3 of refresh_prompt_callback (the callback)
+fcp_tmux_target_win() {
+    if [[ $TMUX_PANE ]]; then
+        # Resolve the window from the pane running this shell, then keep that stable id.
+        tmux display-message -p -t "$TMUX_PANE" '#{window_id}'
+    elif [[ $TMUX ]]; then
+        # Fallback for shells that do not expose TMUX_PANE.
+        tmux display-message -p '#{window_id}'
+    fi
+}
+
 fcp_update_prompt_sub() {
     local rc="$1"
     local timer_show="$2"
-    $BASE/prompt zsh "$rc" 0 "$timer_show"
+    local tmux_target_win="$3"
+    $BASE/prompt zsh "$rc" 0 "$timer_show" "$tmux_target_win"
 }
 
 fcp_refresh() {
     local rc="$1"
     local timer_show="$2"
+    local tmux_target_win="$3"
+
+    if [[ -z $tmux_target_win ]]; then
+        tmux_target_win="$(fcp_tmux_target_win)"
+    fi
 
     async_stop_worker       gitprompt
     async_start_worker      gitprompt -z
     async_register_callback gitprompt fcp_refresh_prompt_callback
     async_worker_eval       gitprompt fcp_prompt_async_renice
-    async_job               gitprompt fcp_update_prompt_sub "$rc" "$timer_show"
+    async_job               gitprompt fcp_update_prompt_sub "$rc" "$timer_show" "$tmux_target_win"
 }
 
 fcp_refresh_prompt_callback() {
@@ -82,6 +98,7 @@ fcp_refresh_prompt_callback() {
 fcp_prompt_precmd() {
     local rc="$?"
     local timer_show
+    local tmux_target_win=""
 
     if (( prompt_timer )); then
         timer_show=$((SECONDS - prompt_timer))
@@ -89,8 +106,10 @@ fcp_prompt_precmd() {
         unset prompt_timer
     fi
 
-    fcp_set_prompt "$($BASE/prompt zsh 0 1 "")"
-    fcp_refresh "$rc" "$timer_show"
+    tmux_target_win="$(fcp_tmux_target_win)"
+
+    fcp_set_prompt "$($BASE/prompt zsh 0 1 "" "$tmux_target_win")"
+    fcp_refresh "$rc" "$timer_show" "$tmux_target_win"
 }
 
 add-zsh-hook preexec fcp_cmd_timer_preexec

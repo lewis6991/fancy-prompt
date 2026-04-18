@@ -16,6 +16,7 @@ SHELL="$1"
 RET_CODE="$2"
 FAST="$3"
 CMD_TIME="$4"
+TMUX_TARGET_WIN="$5"
 
 #-------------------------------------------------------------------------------
 # Init
@@ -402,10 +403,14 @@ main() {
       FANCY_PROMPT_USE_SYMBOLS=1
   fi
 
-  if [[ $TMUX ]]; then
-      # capture the target window before running set_git_info in case the user
-      # switches windows before the prompt is updated.
-      TMUX_TARGET_WIN="$(tmux display-message -p '#I')"
+  if [[ -z $TMUX_TARGET_WIN ]]; then
+      if [[ $TMUX_PANE ]]; then
+          # Resolve the window from the current pane, then keep that stable id.
+          TMUX_TARGET_WIN="$(tmux display-message -p -t "$TMUX_PANE" '#{window_id}')"
+      elif [[ $TMUX ]]; then
+          # Fallback for shells that do not expose TMUX_PANE.
+          TMUX_TARGET_WIN="$(tmux display-message -p '#{window_id}')"
+      fi
   fi
 
   #-------------------------------------------------------------------------------
@@ -469,11 +474,11 @@ main() {
   if $in_git; then
       if [[ $CHECKOUT != "" ]]; then
           name="$(git rev-parse --show-toplevel | xargs basename)"
-          if [[ $TMUX ]]; then
+          if [[ -n $TMUX_TARGET_WIN ]]; then
               tmux rename-window -t "$TMUX_TARGET_WIN" "$name#[fg=colour8][$CHECKOUT]"
           fi
       fi
-  elif [[ $TMUX ]]; then
+  elif [[ -n $TMUX_TARGET_WIN ]]; then
       tmux rename-window -t "$TMUX_TARGET_WIN" "$(basename "$orig_pwd")"
   fi
 
