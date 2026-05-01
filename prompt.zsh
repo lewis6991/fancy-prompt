@@ -40,7 +40,7 @@ fcp_update_prompt_sub() {
     local rc="$1"
     local timer_show="$2"
     local tmux_target_win="$3"
-    $BASE/prompt zsh "$rc" 0 "$timer_show" "$tmux_target_win"
+    $BASE/prompt zsh "$rc" 0 "$timer_show" "$tmux_target_win" 1
 }
 
 fcp_refresh() {
@@ -108,7 +108,7 @@ fcp_prompt_precmd() {
 
     tmux_target_win="$(fcp_tmux_target_win)"
 
-    fcp_set_prompt "$($BASE/prompt zsh 0 1 "" "$tmux_target_win")"
+    fcp_set_prompt "$($BASE/prompt zsh 0 1 "" "$tmux_target_win" 1)"
     fcp_refresh "$rc" "$timer_show" "$tmux_target_win"
 }
 

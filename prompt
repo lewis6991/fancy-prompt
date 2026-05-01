@@ -17,6 +17,7 @@ RET_CODE="$2"
 FAST="$3"
 CMD_TIME="$4"
 TMUX_TARGET_WIN="$5"
+TMUX_TARGET_CAPTURED="$6"
 
 #-------------------------------------------------------------------------------
 # Init
@@ -403,7 +404,9 @@ main() {
       FANCY_PROMPT_USE_SYMBOLS=1
   fi
 
-  if [[ -z $TMUX_TARGET_WIN ]]; then
+  # Zsh captures the target before the slow prompt work starts. If that lookup
+  # failed, do not rediscover the active tmux window after the user has moved.
+  if [[ -z $TMUX_TARGET_WIN && $TMUX_TARGET_CAPTURED != 1 ]]; then
       if [[ $TMUX_PANE ]]; then
           # Resolve the window from the current pane, then keep that stable id.
           TMUX_TARGET_WIN="$(tmux display-message -p -t "$TMUX_PANE" '#{window_id}')"
