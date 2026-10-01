@@ -2,7 +2,7 @@
 #-------------------------------------------------------------------------------
 # File        : .prompt
 # Author      : Lewis Russell
-# Description : Very useful zsh/csh/tcsh/bash prompt for seamless use with Git
+# Description : bash/zsh prompt for seamless use with Git
 #-------------------------------------------------------------------------------
 
 # The prompt will check the git config for branch.<branch>.upstream
@@ -50,25 +50,29 @@ if [ "$SHELL" == "bash" ]; then
     C_END='\]'
     P_USER='\u'
     P_HOST='\H'
-else # csh, tcsh and zsh
+elif [ "$SHELL" == "zsh" ]; then
     C_START='%{'
     C_END='%}'
     P_USER='%n'
     P_HOST='%m'
+else
+    printf 'Unsupported shell: %s (expected bash or zsh)\n' "$SHELL" >&2
+    exit 1
 fi
 
 # reverse="${c_start}\\e[3;35m${c_end}"
 # underlined="${c_start}\\e[4;35m${c_end}"
 # dim="${c_start}\\e[10;35m${c_end}"
-GRAY="$C_START\\e[0;90m$C_END"
-RED="$C_START\\e[0;31m$C_END"
-GREEN="$C_START\\e[0;32m$C_END"
-YELLOW="$C_START\\e[0;33m$C_END"
-BLUE="$C_START\\e[0;34m$C_END"
-MAGENTA="$C_START\\e[0;35m$C_END"
-CYAN="$C_START\\e[0;36m$C_END"
-WHITE="$C_START\\e[0;37m$C_END"
-END="$C_START\\e[0m$C_END" # This is needed at the end.
+# Emit colours directly so shell hooks need not decode backslashes in names.
+GRAY="$C_START"$'\e[0;90m'"$C_END"
+RED="$C_START"$'\e[0;31m'"$C_END"
+GREEN="$C_START"$'\e[0;32m'"$C_END"
+YELLOW="$C_START"$'\e[0;33m'"$C_END"
+BLUE="$C_START"$'\e[0;34m'"$C_END"
+MAGENTA="$C_START"$'\e[0;35m'"$C_END"
+CYAN="$C_START"$'\e[0;36m'"$C_END"
+WHITE="$C_START"$'\e[0;37m'"$C_END"
+END="$C_START"$'\e[0m'"$C_END" # This is needed at the end.
 
 # Emit an OSC-133;A sequence before each prompt.
 if [ "$SHELL" == "zsh" ]; then
@@ -92,15 +96,6 @@ fi
 #-------------------------------------------------------------------------------
 var_enabled() {
     [[ -n "$1" && "$1" != 0 ]]
-}
-
-check_error() {
-    local ret_code="$1"
-    local code="$2"
-    if [ "$ret_code" != 0 ]; then
-        echo "ERROR $code:$ret_code"
-        exit 1
-    fi
 }
 
 check_command() {
@@ -162,42 +157,50 @@ set_git_checkout() {
         return
     fi
 
-    # shellcheck disable=2207
-    declare -a rp=($(git rev-parse --path-format=absolute --abbrev-ref HEAD --git-dir --git-common-dir '@{u}'))
+    local info checkout git_dir git_common_dir
+    # Capture Git's status before parsing, preserving spaces and backslashes.
+    info=$(git rev-parse --path-format=absolute --abbrev-ref HEAD --git-dir --git-common-dir)
+    {
+        IFS= read -r checkout
+        IFS= read -r git_dir
+        IFS= read -r git_common_dir
+    } <<< "$info"
 
-    local checkout=${rp[0]}
-
-    local remote=$(git config --get branch."$checkout".remote || true)
-    local upstream=$(git config --get branch."$checkout".upstream || true)
+    # Missing optional config values return 1.
+    # Use [ ] for these status checks so Bash 3.2 honors errexit on failure.
+    local remote upstream counts
+    remote=$(git config --get branch."$checkout".remote) || [ "$?" -eq 1 ]
+    upstream=$(git config --get branch."$checkout".upstream) || [ "$?" -eq 1 ]
 
     if [[ -z $upstream ]]; then
-        local gh_resolved=$(git config --get remote.upstream.gh-resolved || true)
+        local gh_resolved
+        gh_resolved=$(git config --get remote.upstream.gh-resolved) || [ "$?" -eq 1 ]
         if [[ -n $gh_resolved ]]; then
-            upstream="upstream/$(git remote show upstream | sed -n '/HEAD branch/s/.*: //p')"
+            upstream=$(git symbolic-ref --quiet --short refs/remotes/upstream/HEAD 2> /dev/null) || [ "$?" -eq 1 ]
         fi
     fi
 
     if [[ $upstream != "" && "$remote/$checkout" != "$upstream" ]]; then
-        read -ra AB <<< "$(git rev-list --left-right --count "$upstream"...HEAD)"
+        counts=$(git rev-list --left-right --count "$upstream"...HEAD)
+        read -r COMMITS_BEHIND_UPSTREAM COMMITS_AHEAD_UPSTREAM <<< "$counts"
         CHECKOUT_UPSTREAM="$upstream"
-        COMMITS_BEHIND_UPSTREAM=${AB[0]}
-        COMMITS_AHEAD_UPSTREAM=${AB[1]}
     fi
 
 
-    local git_dir=${rp[1]}
-    local git_common_dir=${rp[2]}
-    local remote_full=${rp[3]}
-    local push_branch=${remote_full#*/}  # upstream/main -> main
-
-    if [[ $push_branch == "" ]]; then
-        local merge; merge=$(git config --get branch."$checkout".merge)
-        push_branch="$remote/$merge"
+    local remote_full push_branch=""
+    if remote_full=$(git rev-parse --abbrev-ref '@{u}' 2> /dev/null); then
+        push_branch=${remote_full#"$remote/"}
+        counts=$(git rev-list --left-right --count "$remote_full"...HEAD)
+        read -r COMMITS_BEHIND COMMITS_AHEAD <<< "$counts"
+    elif [[ -n $remote ]]; then
+        local merge
+        merge=$(git config --get branch."$checkout".merge) || [ "$?" -eq 1 ]
+        push_branch=${merge#refs/heads/}
     fi
 
     CHECKOUT=$checkout
 
-    if [[ "$CHECKOUT" =~ HEAD ]]; then
+    if [[ "$CHECKOUT" == HEAD ]]; then
         local tag
 
         # Show short hash if not on a branch
@@ -209,7 +212,7 @@ set_git_checkout() {
         elif [[ -f "$git_dir/BISECT_START" ]]; then
             # Are we bisecting?
             CHECKOUT="$CHECKOUT(bisecting)"
-        elif tag=$(git describe --candidates=1 --exact-match); then
+        elif tag=$(git describe --candidates=1 --exact-match 2> /dev/null); then
             CHECKOUT=$tag
             CHECKOUT_IS_TAG=1
         fi
@@ -243,15 +246,16 @@ parse_porcelain_info() {
     UNTRACKED=0
     CONFLICTS=0
 
+    # Prefix increments avoid an errexit when a counter starts at zero.
     while IFS= read -r line ; do
-        if [[ $line =~ ^[MTRC][\ MD] ]]; then ((STAGED_CHANGED   ++)); fi
-        if [[ $line =~ ^A[\ MD]      ]]; then ((STAGED_ADDED     ++)); fi
-        if [[ $line =~ ^D\           ]]; then ((STAGED_DELETED   ++)); fi
-        if [[ $line =~ ^[\ MARC]D    ]]; then ((UNSTAGED_DELETED ++)); fi
-        if [[ $line =~ ^[\ MARC]M    ]]; then ((UNSTAGED_CHANGED ++)); fi
-        if [[ $line =~ ^[?][?]       ]]; then ((UNTRACKED        ++)); fi
+        if [[ $line =~ ^[MTRC][\ MD] ]]; then ((++STAGED_CHANGED  )); fi
+        if [[ $line =~ ^A[\ MD]      ]]; then ((++STAGED_ADDED    )); fi
+        if [[ $line =~ ^D\           ]]; then ((++STAGED_DELETED  )); fi
+        if [[ $line =~ ^[\ MARC]D    ]]; then ((++UNSTAGED_DELETED)); fi
+        if [[ $line =~ ^[\ MARC]M    ]]; then ((++UNSTAGED_CHANGED)); fi
+        if [[ $line =~ ^[?][?]       ]]; then ((++UNTRACKED       )); fi
         if [[ $line =~ ^[DU][DU] ]] || [[ $line =~ ^[AU][AU]    ]]; then
-            ((CONFLICTS++));
+            ((++CONFLICTS));
         fi
         # DD  unmerged, both deleted
         # AU  unmerged, added by us
@@ -263,14 +267,19 @@ parse_porcelain_info() {
     done <<< "$porcelain_info"
 }
 
-get_local_branches() {
+get_local_branches() (
+    set -e
+
+    local branches
     # Local branches that do not have an upstream of the same name
     if git_vercomp "2.4.0"; then
-        git branch -vv --format='%(refname:strip=2)#%(upstream:strip=3)' | grep -vcE '([^#]+)#\1'
+        branches=$(git branch -vv --format='%(refname:strip=2)#%(upstream:strip=3)')
+        grep -vcE '([^#]+)#\1' <<< "$branches" || [ "$?" -eq 1 ]
     else
-        git branch | grep -cv master
+        branches=$(git branch)
+        grep -cv master <<< "$branches" || [ "$?" -eq 1 ]
     fi
-}
+)
 
 if ! command -v timeout &> /dev/null; then
     timeout() { perl -e 'alarm shift; exec @ARGV' "$@"; }
@@ -288,31 +297,14 @@ set_git_info() {
     local info
     info=$(get_git_info)
 
-    local error
-    error=$(check_error "$?" "2")
-
     parse_porcelain_info "$info"
 
     local submodule_info
     submodule_info=$(timeout "$TIMEOUT" git submodule status --recursive 2> /dev/null)
     if [ "$submodule_info" != "" ]; then
-        SUBMODULE_UNSYNC=$(grep -cE '^\+' <<< "$submodule_info")
-        SUBMODULE_UNINIT=$(grep -cE '^-'  <<< "$submodule_info")
-    fi
-
-    if [ "$error" != "" ]; then
-        return
-    fi
-
-    # branch_info=$(head -1 <<< "$info")
-    # COMMITS_AHEAD=$(grep 'ahead'  <<< "$branch_info" | sed -E  's/.*ahead ([0-9]+).*/\1/g')
-    # COMMITS_BEHIND=$(grep 'behind' <<< "$branch_info" | sed -E 's/.*behind ([0-9]+).*/\1/g')
-    # error=$(check_error "$?" "4")
-    COMMITS_BEHIND=$(git rev-list --count --left-only "HEAD@{upstream}...HEAD")
-    COMMITS_AHEAD=$(git rev-list --count "HEAD@{upstream}..HEAD")
-
-    if [ "$error" != "" ]; then
-        return
+        # grep prints 0 and returns 1 when no submodules match.
+        SUBMODULE_UNSYNC=$(grep -cE '^\+' <<< "$submodule_info") || [ "$?" -eq 1 ]
+        SUBMODULE_UNINIT=$(grep -cE '^-'  <<< "$submodule_info") || [ "$?" -eq 1 ]
     fi
 
     # # MacOS can add leading whitespace in wc output so pass through tr
@@ -325,16 +317,36 @@ set_git_info() {
     set_git_checkout
 }
 
+escape_prompt() {
+    local value=$1
+    if [[ $SHELL == bash ]]; then
+        # Bash decodes prompt escapes before evaluating substitutions.
+        value=${value//\\/\\\\\\\\}
+        value=${value//\$/\\\\\$}
+        value=${value//\`/\\\\\`}
+    else
+        value=${value//%/%%}
+    fi
+    printf '%s' "$value"
+}
+
 build_section() {
     local colour=$1
     local symbol=$2
     local value=$3
     if [[ $value && $value != 0 ]]; then
-        echo "$colour$symbol$value"
+        printf '%s%s' "$colour" "$symbol"
+        escape_prompt "$value"
     fi
 }
 
-get_scm_prompt() {
+get_scm_prompt() (
+    set -e -o pipefail
+
+    if ((!FAST)); then
+        set_git_info
+    fi
+
     if [[ $CHECKOUT == "" ]]; then
         printf "%s" "$GRAY...$GRAY"
         return
@@ -374,8 +386,15 @@ get_scm_prompt() {
     src_ctrl+=$(build_section " $RED"     ⚑       "$STASHES"         )
     src_ctrl+=$(build_section " $YELLOW"         "$LOCAL_BRANCHES"  )
 
+    if [[ -n $TMUX_TARGET_WIN ]]; then
+        local name
+        name=$(git rev-parse --show-toplevel)
+        name=$(basename "$name")
+        tmux rename-window -t "$TMUX_TARGET_WIN" "$name#[fg=colour8][$CHECKOUT]" || true
+    fi
+
     printf "%s" "$GRAY$src_ctrl$GRAY"
-}
+)
 
 get_prompt_arrow() {
     local ret_colour=$1
@@ -421,7 +440,7 @@ main() {
   #-------------------------------------------------------------------------------
 
   local in_gitdir
-  local in_bare_gitdir
+  local in_bare_gitdir=false
   local orig_pwd; orig_pwd=$(pwd)
 
   # If we a located somewhere deep in .git/.. then navigate out of it to prevent
@@ -438,19 +457,26 @@ main() {
 
   local prompt_info=""
   if $in_git; then
-      if ((!FAST)); then
-          set_git_info
+      # An if/|| around this call would disable errexit inside the helper.
+      prompt_info=$(get_scm_prompt)
+      # shellcheck disable=SC2181
+      if (( $? != 0 )); then
+          prompt_info="$GRAY...$GRAY"
       fi
-      prompt_info+="$(get_scm_prompt)"
   fi
 
+  local dir
   if $in_bare_gitdir; then
-      dir=$(basename $orig_pwd)
+      dir=$(basename "$orig_pwd")
   elif $in_gitdir; then
       dir=$(basename "$(git rev-parse --show-toplevel)")/$(sed -E 's/.*\/([^/]*\.git(\/.*)?)/\1/' <<< "$orig_pwd")
   elif $in_git; then
       dir=$(basename "$(git rev-parse --show-toplevel)")/$(git rev-parse --show-prefix)
       dir=${dir%?}  # Remove last /
+  fi
+
+  if [[ -n $dir ]]; then
+      dir=$(escape_prompt "$dir")
   elif [ "$SHELL" == "bash" ]; then
       dir='\W'
   else
@@ -474,19 +500,12 @@ main() {
       prompt_time="$GRAY$(convertsecs "$CMD_TIME")"
   fi
 
-  if $in_git; then
-      if [[ $CHECKOUT != "" ]]; then
-          name="$(git rev-parse --show-toplevel | xargs basename)"
-          if [[ -n $TMUX_TARGET_WIN ]]; then
-              tmux rename-window -t "$TMUX_TARGET_WIN" "$name#[fg=colour8][$CHECKOUT]"
-          fi
-      fi
-  elif [[ -n $TMUX_TARGET_WIN ]]; then
+  if ! $in_git && [[ -n $TMUX_TARGET_WIN ]]; then
       tmux rename-window -t "$TMUX_TARGET_WIN" "$(basename "$orig_pwd")"
   fi
 
   printf "%s\n$OSC133_START%s%s\n" "$prompt_time" "$prompt" "$prompt_info"
-  printf "%s " "$(get_prompt_arrow $ret_colour)"
+  printf "%s " "$(get_prompt_arrow "$ret_colour")"
 }
 
 main
