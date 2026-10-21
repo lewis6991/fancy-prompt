@@ -13,7 +13,8 @@
 
 # Installation
 
-The prompt helper requires Bash 3.2+ on your `PATH`, including when used with Zsh.
+The prompt helper requires Git 2.31+ and Bash 3.2+ on your `PATH`, including
+when used with Zsh.
 
 ### Zsh
 

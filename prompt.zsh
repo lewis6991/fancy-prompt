@@ -113,15 +113,14 @@ fcp_prompt_precmd() {
     local timer_show
     local tmux_target_win=""
 
-    if (( prompt_timer )); then
+    if [[ -n ${prompt_timer-} ]]; then
         timer_show=$((SECONDS - prompt_timer))
-        timer_show=$(printf '%.*f\n' 0 "$timer_show")
         unset prompt_timer
     fi
 
     tmux_target_win="$(fcp_tmux_target_win)"
 
-    fcp_set_prompt "$("$FCP_BASE/prompt" zsh 0 1 "" "$tmux_target_win" 1)"
+    fcp_set_prompt "$("$FCP_BASE/prompt" zsh "$rc" 1 "$timer_show" "$tmux_target_win" 1)"
     fcp_refresh "$rc" "$timer_show" "$tmux_target_win"
 }
 

@@ -31,6 +31,13 @@ unalias -a
 CHECKOUT=""
 CHECKOUT_NAME=""
 CHECKOUT_IS_TAG=0
+FCP_GIT_DIR=""
+FCP_GIT_COMMON_DIR=""
+FCP_GIT_ROOT=""
+FCP_GIT_PREFIX=""
+STATUS_HEAD=""
+STATUS_OID=""
+STATUS_UPSTREAM=""
 STAGED_CHANGED=""
 STAGED_ADDED=""
 STAGED_DELETED=""
@@ -105,7 +112,7 @@ check_command() {
 
 convertsecs() {
     d=$((${1} / 86400))
-    h=$((${1} / 3600))
+    h=$((${1} % 86400 / 3600))
     m=$((${1} % 3600 / 60))
     s=$((${1} % 60))
     if ((d!=0)); then
@@ -119,54 +126,27 @@ convertsecs() {
     fi
 }
 
-vercomp() {
-    if [[ "$1" == "$2" ]]; then
-        return 0
-    fi
-
-    local -a ver1 ver2
-
-    IFS='.' read -r -a ver1 <<< "$1"
-    IFS='.' read -r -a ver2 <<< "$2"
-
-    local i
-
-    for ((i=0; i<${#ver1[@]} || i<${#ver2[@]}; i++)); do
-        [[ -z ${ver1[i]} ]] && ver1[i]=0
-        [[ -z ${ver2[i]} ]] && ver2[i]=0
-        if ((ver1[i] > ver2[i])); then
-            return 0
-        elif ((ver1[i] < ver2[i])); then
-            return 1
-        fi
-    done
-
-    return 1
-}
-
-git_vercomp() {
-    if [ -z "$GIT_VERSION" ]; then
-        GIT_VERSION=$(git --version | awk '{print $3}')
-    fi
-
-    vercomp "$GIT_VERSION" "$1"
+read_git_paths() {
+    local info
+    # Metadata and bare repositories have no --show-toplevel. Git still returns
+    # the preceding fields, which let the caller handle those directories.
+    info=$(git rev-parse --path-format=absolute --is-inside-git-dir --is-bare-repository \
+        --git-dir --git-common-dir --show-toplevel --show-prefix 2> /dev/null)
+    {
+        IFS= read -r FCP_INSIDE_GITDIR
+        IFS= read -r FCP_BARE
+        IFS= read -r FCP_GIT_DIR
+        IFS= read -r FCP_GIT_COMMON_DIR
+        IFS= read -r FCP_GIT_ROOT
+        IFS= read -r FCP_GIT_PREFIX || :
+    } <<< "$info"
 }
 
 set_git_checkout() {
-    if ! git_vercomp "1.7.2"; then
-        CHECKOUT="!$(git rev-parse --abbrev-ref HEAD)"
-        CHECKOUT_NAME="$CHECKOUT"
-        return
+    local checkout=$STATUS_HEAD
+    if [[ $checkout == "(detached)" ]]; then
+        checkout=HEAD
     fi
-
-    local info checkout git_dir git_common_dir
-    # Capture Git's status before parsing, preserving spaces and backslashes.
-    info=$(git rev-parse --path-format=absolute --abbrev-ref HEAD --git-dir --git-common-dir)
-    {
-        IFS= read -r checkout
-        IFS= read -r git_dir
-        IFS= read -r git_common_dir
-    } <<< "$info"
 
     # Missing optional config values return 1.
     # Use [ ] for these status checks so Bash 3.2 honors errexit on failure.
@@ -182,18 +162,21 @@ set_git_checkout() {
         fi
     fi
 
-    if [[ $upstream != "" && "$remote/$checkout" != "$upstream" ]]; then
-        counts=$(git rev-list --left-right --count "$upstream"...HEAD)
-        read -r COMMITS_BEHIND_UPSTREAM COMMITS_AHEAD_UPSTREAM <<< "$counts"
+    if [[ -n $upstream && "$remote/$checkout" != "$upstream" && $STATUS_OID != "(initial)" ]]; then
+        if [[ $upstream == "$STATUS_UPSTREAM" ]]; then
+            COMMITS_BEHIND_UPSTREAM=$COMMITS_BEHIND
+            COMMITS_AHEAD_UPSTREAM=$COMMITS_AHEAD
+        else
+            counts=$(git rev-list --left-right --count "$upstream"...HEAD)
+            read -r COMMITS_BEHIND_UPSTREAM COMMITS_AHEAD_UPSTREAM <<< "$counts"
+        fi
         CHECKOUT_UPSTREAM="$upstream"
     fi
 
 
-    local remote_full push_branch=""
-    if remote_full=$(git rev-parse --abbrev-ref '@{u}' 2> /dev/null); then
-        push_branch=${remote_full#"$remote/"}
-        counts=$(git rev-list --left-right --count "$remote_full"...HEAD)
-        read -r COMMITS_BEHIND COMMITS_AHEAD <<< "$counts"
+    local push_branch=""
+    if [[ -n $STATUS_UPSTREAM ]]; then
+        push_branch=${STATUS_UPSTREAM#"$remote/"}
     elif [[ -n $remote ]]; then
         local merge
         merge=$(git config --get branch."$checkout".merge) || [ "$?" -eq 1 ]
@@ -208,10 +191,10 @@ set_git_checkout() {
         # Show short hash if not on a branch
         CHECKOUT=$(git rev-parse --short HEAD)
 
-        if [[ -d "$git_dir/rebase-merge" || -d "$git_dir/rebase-apply" ]]; then
+        if [[ -d "$FCP_GIT_DIR/rebase-merge" || -d "$FCP_GIT_DIR/rebase-apply" ]]; then
             # Are we rebasing?
             CHECKOUT="$CHECKOUT(rebasing)"
-        elif [[ -f "$git_dir/BISECT_START" ]]; then
+        elif [[ -f "$FCP_GIT_DIR/BISECT_START" ]]; then
             # Are we bisecting?
             CHECKOUT="$CHECKOUT(bisecting)"
         elif tag=$(git describe --candidates=1 --exact-match 2> /dev/null); then
@@ -234,18 +217,13 @@ set_git_checkout() {
         CHECKOUT="$CHECKOUT!"
     fi
 
-    if [[ "$git_dir" != "$git_common_dir" ]]; then
+    if [[ "$FCP_GIT_DIR" != "$FCP_GIT_COMMON_DIR" ]]; then
         CHECKOUT="[worktree]$CHECKOUT"
     fi
 }
 
 parse_porcelain_info() {
     local porcelain_info=$1
-    # porcelain info should be common between git
-    if [ "$porcelain_info" == "?" ]; then
-        return
-    fi
-
     STAGED_CHANGED=0
     STAGED_ADDED=0
     STAGED_DELETED=0
@@ -254,52 +232,61 @@ parse_porcelain_info() {
     UNTRACKED=0
     CONFLICTS=0
 
-    # Prefix increments avoid an errexit when a counter starts at zero.
-    while IFS= read -r line ; do
-        if [[ $line =~ ^[MTRC][\ MD] ]]; then ((++STAGED_CHANGED  )); fi
-        if [[ $line =~ ^A[\ MD]      ]]; then ((++STAGED_ADDED    )); fi
-        if [[ $line =~ ^D\           ]]; then ((++STAGED_DELETED  )); fi
-        if [[ $line =~ ^[\ MARC]D    ]]; then ((++UNSTAGED_DELETED)); fi
-        # " A" is an unstaged addition created by git add -N.
-        if [[ $line =~ ^[\ MARC]M || $line == " A"* ]]; then ((++UNSTAGED_CHANGED)); fi
-        if [[ $line =~ ^[?][?]       ]]; then ((++UNTRACKED       )); fi
-        if [[ $line =~ ^[DU][DU] ]] || [[ $line =~ ^[AU][AU]    ]]; then
-            ((++CONFLICTS));
-        fi
-        # DD  unmerged, both deleted
-        # AU  unmerged, added by us
-        # UD  unmerged, deleted by them
-        # UA  unmerged, added by them
-        # DU  unmerged, deleted by us
-        # AA  unmerged, both added
-        # UU  unmerged, both modified
+    local line xy ahead behind
+    while IFS= read -r line; do
+        case $line in
+            '# branch.head '*) STATUS_HEAD=${line#'# branch.head '} ;;
+            '# branch.oid '*) STATUS_OID=${line#'# branch.oid '} ;;
+            '# branch.upstream '*) STATUS_UPSTREAM=${line#'# branch.upstream '} ;;
+            '# branch.ab '*)
+                read -r ahead behind <<< "${line#'# branch.ab '}"
+                COMMITS_AHEAD=${ahead#+}
+                COMMITS_BEHIND=${behind#-}
+                ;;
+            '# stash '*) STASHES=${line#'# stash '} ;;
+            'u '*) ((++CONFLICTS)) ;;
+            '? '*) ((++UNTRACKED)) ;;
+            [12]' '*)
+                xy=${line:2:2}
+                case ${xy:0:1} in
+                    [MTRC]) ((++STAGED_CHANGED)) ;;
+                    A) ((++STAGED_ADDED)) ;;
+                    D) ((++STAGED_DELETED)) ;;
+                esac
+                case ${xy:1:1} in
+                    [MTA]) ((++UNSTAGED_CHANGED)) ;;
+                    D) ((++UNSTAGED_DELETED)) ;;
+                esac
+                ;;
+        esac
     done <<< "$porcelain_info"
 }
 
-get_local_branches() (
-    set -e
-
-    local branches
-    # Local branches that do not have an upstream of the same name
-    if git_vercomp "2.4.0"; then
-        branches=$(git branch -vv --format='%(refname:strip=2)#%(upstream:strip=3)')
-        grep -vcE '([^#]+)#\1' <<< "$branches" || [ "$?" -eq 1 ]
-    else
-        branches=$(git branch)
-        grep -cv master <<< "$branches" || [ "$?" -eq 1 ]
-    fi
-)
+set_local_branches() {
+    local branches branch upstream remote tracked
+    branches=$(git for-each-ref --format='%(refname:strip=2)%09%(upstream)%09%(upstream:remotename)' refs/heads)
+    LOCAL_BRANCHES=0
+    while IFS=$'\t' read -r branch upstream remote; do
+        [[ -n $branch ]] || continue
+        tracked=""
+        if [[ $upstream == refs/heads/* ]]; then
+            tracked=${upstream#refs/heads/}
+        elif [[ -n $remote && $upstream == "refs/remotes/$remote/"* ]]; then
+            tracked=${upstream#"refs/remotes/$remote/"}
+        fi
+        if [[ $branch != "$tracked" ]]; then
+            ((++LOCAL_BRANCHES))
+        fi
+    done <<< "$branches"
+}
 
 if ! command -v timeout &> /dev/null; then
     timeout() { perl -e 'alarm shift; exec @ARGV' "$@"; }
 fi
 
 get_git_info() {
-    if git_vercomp "1.7.2"; then
-        timeout "$TIMEOUT" git status --untracked-files=normal --branch --porcelain --ignore-submodules
-    else
-        timeout "$TIMEOUT" git status --untracked-files=normal --porcelain
-    fi
+    timeout "$TIMEOUT" git --no-optional-locks status --untracked-files=normal \
+        --branch --show-stash --porcelain=v2 --ignore-submodules
 }
 
 set_git_info() {
@@ -308,21 +295,18 @@ set_git_info() {
 
     parse_porcelain_info "$info"
 
-    local submodule_info
-    submodule_info=$(timeout "$TIMEOUT" git submodule status --recursive 2> /dev/null)
-    if [ "$submodule_info" != "" ]; then
-        # grep prints 0 and returns 1 when no submodules match.
-        SUBMODULE_UNSYNC=$(grep -cE '^\+' <<< "$submodule_info") || [ "$?" -eq 1 ]
-        SUBMODULE_UNINIT=$(grep -cE '^-'  <<< "$submodule_info") || [ "$?" -eq 1 ]
+    # Check actual gitlinks, including when .gitmodules is missing or deleted.
+    local entries submodule_info
+    entries=$(git ls-files --stage)
+    if [[ $entries == 160000\ * || $entries == *$'\n'160000\ * ]]; then
+        submodule_info=$(timeout "$TIMEOUT" git submodule status --recursive 2> /dev/null)
+        if [[ -n $submodule_info ]]; then
+            SUBMODULE_UNSYNC=$(grep -cE '^\+' <<< "$submodule_info") || [ "$?" -eq 1 ]
+            SUBMODULE_UNINIT=$(grep -cE '^-'  <<< "$submodule_info") || [ "$?" -eq 1 ]
+        fi
     fi
 
-    # # MacOS can add leading whitespace in wc output so pass through tr
-    # STASHES=$(git stash list | wc -l | tr -d ' ')
-    STASHES=$(git rev-list --walk-reflogs --ignore-missing --count refs/stash)
-
-    # Local branches that do not have an upstream of the same name
-    LOCAL_BRANCHES=$(get_local_branches)
-
+    set_local_branches
     set_git_checkout
 }
 
@@ -411,8 +395,7 @@ get_scm_prompt() (
 
     if [[ -n $TMUX_TARGET_WIN ]]; then
         local name
-        name=$(git rev-parse --show-toplevel)
-        name=$(basename "$name")
+        name=${FCP_GIT_ROOT##*/}
         tmux rename-window -t "$TMUX_TARGET_WIN" "$name#[fg=colour8][$CHECKOUT]" || true
     fi
 
@@ -429,14 +412,6 @@ get_prompt_arrow() {
     fi
 
     echo "$ret_colour$arrow$END"
-}
-
-toboolean() {
-    if "$@"; then
-        echo true
-    else
-        echo false
-    fi
 }
 
 main() {
@@ -462,21 +437,36 @@ main() {
   # Source Control
   #-------------------------------------------------------------------------------
 
-  local in_gitdir
-  local in_bare_gitdir=false
-  local orig_pwd; orig_pwd=$(pwd)
+  local orig_pwd; orig_pwd=$(pwd -P)
+  read_git_paths
+  local in_gitdir=$FCP_INSIDE_GITDIR
+  local in_bare_gitdir=$FCP_BARE
+  local metadata_label=""
 
-  # If we a located somewhere deep in .git/.. then navigate out of it to prevent
-  # the error: "fatal: This operation must be run in a work tree"
-  in_gitdir=$(pwd | toboolean grep -q "\\.git\(/.*\)\?$")
-  if $in_gitdir; then
-      in_bare_gitdir=$(git rev-parse --is-bare-repository)
-      cd "$(pwd | sed -E 's%[^/]*\.git(\/.*)?$%%g')" || exit
+  if [[ $in_gitdir == true && $in_bare_gitdir != true ]]; then
+      local display_root=${FCP_GIT_COMMON_DIR%/.git}
+      metadata_label=${orig_pwd##*/}
+      if [[ $display_root != "$FCP_GIT_COMMON_DIR" && $orig_pwd == "$display_root/"* ]]; then
+          metadata_label="${display_root##*/}/${orig_pwd#"$display_root/"}"
+      fi
+
+      local work_tree=$FCP_GIT_ROOT git_file
+      if [[ -z $work_tree && -f $FCP_GIT_DIR/gitdir ]]; then
+          IFS= read -r git_file < "$FCP_GIT_DIR/gitdir"
+          work_tree=${git_file%/*}
+      elif [[ -z $work_tree && $FCP_GIT_DIR == */.git ]]; then
+          work_tree=${FCP_GIT_DIR%/.git}
+      fi
+      if [[ -n $work_tree ]]; then
+          cd "$work_tree" || exit
+          read_git_paths
+      fi
   fi
 
-  # Return 'true' or 'false' which can be directly evaluated
-  local in_git
-  in_git=$(git rev-parse --is-inside-work-tree 2> /dev/null || echo false)
+  local in_git=false
+  if [[ -n $FCP_GIT_ROOT ]]; then
+      in_git=true
+  fi
 
   local prompt_info=""
   if $in_git; then
@@ -489,13 +479,13 @@ main() {
   fi
 
   local dir
-  if $in_bare_gitdir; then
-      dir=$(basename "$orig_pwd")
-  elif $in_gitdir; then
-      dir=$(basename "$(git rev-parse --show-toplevel)")/$(sed -E 's/.*\/([^/]*\.git(\/.*)?)/\1/' <<< "$orig_pwd")
+  if [[ $in_bare_gitdir == true ]]; then
+      dir=${orig_pwd##*/}
+  elif [[ -n $metadata_label ]]; then
+      dir=$metadata_label
   elif $in_git; then
-      dir=$(basename "$(git rev-parse --show-toplevel)")/$(git rev-parse --show-prefix)
-      dir=${dir%?}  # Remove last /
+      dir="${FCP_GIT_ROOT##*/}/${FCP_GIT_PREFIX%/}"
+      dir=${dir%/}
   fi
 
   if [[ -n $dir ]]; then

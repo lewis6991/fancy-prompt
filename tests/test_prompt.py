@@ -19,7 +19,7 @@ class PromptTest(unittest.TestCase):
         self.repo = self.root / "repo"
         self.repo.mkdir()
         self.env = os.environ.copy()
-        for name in ("TMUX", "PROMPT_COMMAND", "BASH_ENV"):
+        for name in ("TMUX", "TMUX_PANE", "PROMPT_COMMAND", "BASH_ENV"):
             self.env.pop(name, None)
         self.env.update(
             GIT_CONFIG_GLOBAL=os.devnull,
@@ -31,6 +31,8 @@ class PromptTest(unittest.TestCase):
         self.git("init", "--quiet")
         self.git("fetch", "--quiet", str(PROJECT), "HEAD")
         self.git("checkout", "--quiet", "-b", "main", "FETCH_HEAD")
+        self.git("config", "user.name", "Test")
+        self.git("config", "user.email", "test@example.invalid")
 
     def command(self, *args, cwd=None):
         result = subprocess.run(
@@ -55,6 +57,12 @@ class PromptTest(unittest.TestCase):
         self.assertIn("fix-HEAD-display!", output)
         self.assertNotIn("->", output)
 
+    def test_branch_before_first_commit(self):
+        empty = self.root / "empty"
+        empty.mkdir()
+        self.command("git", "init", "--quiet", "-b", "topic", cwd=empty)
+        self.assertIn("topic!", self.plain(cwd=empty))
+
     def test_remote_tracking_branch_and_missing_ref(self):
         self.git("remote", "add", "origin", str(PROJECT))
         self.git("update-ref", "refs/remotes/origin/topic", "HEAD")
@@ -69,6 +77,35 @@ class PromptTest(unittest.TestCase):
         self.git("branch", "parent/base")
         self.git("branch", "--set-upstream-to=parent/base", "main")
         self.assertIn("main->parent/base", self.plain())
+
+    def test_diverged_tracking_branch(self):
+        self.git("remote", "add", "origin", str(PROJECT))
+        self.git("update-ref", "refs/remotes/origin/topic", "HEAD")
+        self.git("branch", "--set-upstream-to=origin/topic", "main")
+        self.git("commit", "--quiet", "--allow-empty", "-m", "local")
+        self.git("checkout", "--quiet", "-b", "remote-topic", "origin/topic")
+        self.git("commit", "--quiet", "--allow-empty", "-m", "remote")
+        self.git("update-ref", "refs/remotes/origin/topic", "HEAD")
+        self.git("checkout", "--quiet", "main")
+        self.assertIn("main->topic ↑1 ↓1", self.plain())
+        self.git("config", "branch.main.upstream", "origin/topic")
+        self.assertIn("(origin/topic ↑1 ↓1)", self.plain())
+
+    def test_local_branch_count_uses_complete_tracking_names(self):
+        self.git("remote", "add", "origin", str(PROJECT))
+        for tracked in ("main", "main-extra", "topic/main"):
+            with self.subTest(tracked=tracked):
+                self.git("update-ref", "refs/remotes/origin/" + tracked, "HEAD")
+                self.git("branch", "--set-upstream-to=origin/" + tracked, "main")
+                output = self.plain()
+                if tracked == "main":
+                    self.assertNotIn("", output)
+                else:
+                    self.assertIn("1", output)
+        self.git("branch", "-m", "feature/topic")
+        self.git("update-ref", "refs/remotes/origin/feature/topic", "HEAD")
+        self.git("branch", "--set-upstream-to=origin/feature/topic")
+        self.assertNotIn("", self.plain())
 
     def test_detached_HEAD_and_tag(self):
         self.git("checkout", "--quiet", "--detach")
@@ -115,6 +152,26 @@ class PromptTest(unittest.TestCase):
     def test_inside_git_directory(self):
         self.assertIn("repo/.git/objects", self.plain(cwd=self.repo / ".git" / "objects"))
 
+    def test_working_tree_named_dot_git(self):
+        renamed = self.root / "repo.git"
+        self.repo.rename(renamed)
+        self.repo = renamed
+        output = self.plain()
+        self.assertIn("repo.git main!", output)
+
+    def test_inside_linked_worktree_metadata(self):
+        worktree = self.root / "linked tree"
+        self.git("worktree", "add", "--quiet", "--detach", str(worktree))
+        metadata = Path(self.git("-C", str(worktree), "rev-parse", "--absolute-git-dir"))
+        output = self.plain(cwd=metadata)
+        self.assertIn("repo/.git/worktrees/", output)
+        self.assertIn("[worktree]" + self.git("rev-parse", "--short", "HEAD"), output)
+
+    def test_bare_repository(self):
+        bare = self.root / "bare.git"
+        self.command("git", "clone", "--quiet", "--bare", str(self.repo), str(bare))
+        self.assertIn("bare.git", self.plain(cwd=bare))
+
     def test_upstream_uses_cached_HEAD_without_contacting_remote(self):
         self.git("remote", "add", "upstream", str(self.root / "does-not-exist"))
         self.git("config", "remote.upstream.gh-resolved", "base")
@@ -140,10 +197,9 @@ class PromptTest(unittest.TestCase):
             PATH=str(bin_dir) + os.pathsep + self.env["PATH"],
         )
         for query in (
-            "status --untracked-files=normal --branch --porcelain --ignore-submodules",
-            "submodule status --recursive",
-            "branch -vv --format=%(refname:strip=2)#%(upstream:strip=3)",
-            "rev-parse --path-format=absolute --abbrev-ref HEAD --git-dir --git-common-dir",
+            "--no-optional-locks status --untracked-files=normal --branch --show-stash --porcelain=v2 --ignore-submodules",
+            "ls-files --stage",
+            "for-each-ref --format=%(refname:strip=2)%09%(upstream)%09%(upstream:remotename) refs/heads",
             "config --get branch.main.remote",
             "rev-list --left-right --count main...HEAD",
         ):
@@ -153,6 +209,12 @@ class PromptTest(unittest.TestCase):
                 self.assertIn("repo ...", output)
                 self.assertNotIn("main", output)
                 self.assertTrue(output.endswith("\n> "))
+
+        self.env["FCP_TEST_FAIL"] = "submodule status --recursive"
+        self.assertIn("main!", self.plain())
+        self.git("-c", "protocol.file.allow=always", "submodule", "add", "--quiet",
+                 str(PROJECT), "submodule")
+        self.assertIn("repo ...", self.plain())
 
     def test_clean_and_dirty_tracking_branch(self):
         self.git("remote", "add", "origin", str(PROJECT))
@@ -183,12 +245,68 @@ class PromptTest(unittest.TestCase):
                 self.assertIn(f"\x1b[0;32m{colour_end}+1", output)
                 self.assertIn(f"\x1b[0;35m{colour_end}…1", output)
 
+    def test_unstaged_file_type_change_is_counted(self):
+        tracked = self.repo / "README.md"
+        tracked.unlink()
+        tracked.symlink_to("target")
+        self.assertIn("+1", self.plain())
+        self.git("add", "README.md")
+        self.assertIn("●1", self.plain())
+
+    def test_conflict_is_counted_once(self):
+        self.git("checkout", "--quiet", "-b", "topic")
+        (self.repo / "README.md").write_text("topic\n")
+        self.git("commit", "--quiet", "-am", "topic")
+        self.git("checkout", "--quiet", "main")
+        (self.repo / "README.md").write_text("main\n")
+        self.git("commit", "--quiet", "-am", "main")
+        result = subprocess.run(["git", "merge", "topic"], cwd=self.repo,
+                                env=self.env, capture_output=True)
+        self.assertEqual(result.returncode, 1)
+        output = self.plain()
+        self.assertIn("✖1", output)
+        self.assertNotIn("+1", output)
+
+    def test_status_refresh_does_not_write_index(self):
+        self.env["GIT_OPTIONAL_LOCKS"] = "1"
+        index = self.repo / ".git" / "index"
+        before = (index.read_bytes(), index.stat().st_mtime_ns)
+        os.utime(self.repo / "README.md", (1, 1))
+        self.assertIn("main!", self.plain())
+        self.assertEqual((index.read_bytes(), index.stat().st_mtime_ns), before)
+
+    def test_stash_count(self):
+        (self.repo / "README.md").write_text("stashed\n")
+        self.git("stash", "push", "--quiet")
+        self.assertIn("⚑1", self.plain())
+
     def test_clean_submodule(self):
         self.git("-c", "protocol.file.allow=always", "submodule", "add", "--quiet",
                  str(PROJECT), "submodule")
         output = self.plain()
         self.assertIn("main!", output)
         self.assertNotIn("", output)
+        self.git("-C", "submodule", "-c", "user.name=Test",
+                 "-c", "user.email=test@example.invalid", "commit", "--quiet",
+                 "--allow-empty", "-m", "next")
+        self.assertIn("1", self.plain())
+        self.git("submodule", "deinit", "--force", "submodule")
+        self.assertIn("1", self.plain())
+
+    def test_duration_over_one_day(self):
+        output = self.command(str(PROJECT / "prompt"), "bash", "0", "1", "90061")
+        self.assertIn("1d 1h 1m 1s", ANSI.sub("", output))
+
+    def test_failed_command_is_red_before_async_refresh(self):
+        output = self.command(
+            "zsh", "-f", "-c",
+            'source "$1"; fcp_refresh() { :; }; '
+            'SECONDS=2; prompt_timer=0; false; fcp_prompt_precmd; '
+            'print -Pnr -- "$PROMPT"; (( ! ${+prompt_timer} ))',
+            "test", str(PROJECT / "prompt.zsh"),
+        )
+        self.assertIn("\x1b[0;31m>", output)
+        self.assertIn("2s", output)
 
     def test_tmux_rename_failure_keeps_git_prompt(self):
         bin_dir = self.root / "bin"
