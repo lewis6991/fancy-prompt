@@ -62,6 +62,8 @@ class PromptTest(unittest.TestCase):
         self.assertIn("main->topic", self.plain())
         self.git("update-ref", "-d", "refs/remotes/origin/topic")
         self.assertIn("main->topic", self.plain())
+        self.env["FANCY_PROMPT_USE_SYMBOLS"] = "1"
+        self.assertIn("main → topic", self.plain())
 
     def test_local_tracking_branch_with_slash(self):
         self.git("branch", "parent/base")
@@ -94,6 +96,21 @@ class PromptTest(unittest.TestCase):
         output = self.plain(cwd=worktree)
         self.assertIn("linked tree", output)
         self.assertIn("[worktree]" + self.git("rev-parse", "--short", "HEAD"), output)
+
+    def test_worktree_symbol_replaces_branch_symbol(self):
+        self.env["FANCY_PROMPT_USE_SYMBOLS"] = "1"
+        output = self.plain()
+        self.assertIn("main!", output)
+        self.assertNotIn("󰙅", output)
+
+        worktree = self.root / "linked tree"
+        self.git("worktree", "add", "--quiet", "-b", "topic", str(worktree))
+        self.git("config", "branch.topic.upstream", "main")
+        output = self.plain(cwd=worktree)
+        self.assertIn("󰙅 topic!", output)
+        self.assertIn("(main)", output)
+        self.assertNotIn("[worktree]", output)
+        self.assertNotIn("topic", output)
 
     def test_inside_git_directory(self):
         self.assertIn("repo/.git/objects", self.plain(cwd=self.repo / ".git" / "objects"))
@@ -239,7 +256,7 @@ class PromptTest(unittest.TestCase):
                     'print -Pnr -- "$PROMPT"',
                     "test", str(plugin / entry),
                 )
-                self.assertIn("main!", output)
+                self.assertIn("main!", ANSI.sub("", output))
 
 
 if __name__ == "__main__":

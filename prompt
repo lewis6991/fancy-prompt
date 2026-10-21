@@ -29,6 +29,7 @@ unalias -a
 # Globals
 #-------------------------------------------------------------------------------
 CHECKOUT=""
+CHECKOUT_NAME=""
 CHECKOUT_IS_TAG=0
 STAGED_CHANGED=""
 STAGED_ADDED=""
@@ -154,6 +155,7 @@ git_vercomp() {
 set_git_checkout() {
     if ! git_vercomp "1.7.2"; then
         CHECKOUT="!$(git rev-parse --abbrev-ref HEAD)"
+        CHECKOUT_NAME="$CHECKOUT"
         return
     fi
 
@@ -218,9 +220,15 @@ set_git_checkout() {
         fi
     fi
 
+    CHECKOUT_NAME="$CHECKOUT"
+
     if [ -n "$push_branch" ]; then
         if [ "$CHECKOUT" != "$push_branch" ]; then
-            CHECKOUT="$CHECKOUT->$push_branch"
+            local tracking_arrow="->"
+            if var_enabled "$FANCY_PROMPT_USE_SYMBOLS"; then
+                tracking_arrow=" → "
+            fi
+            CHECKOUT="$CHECKOUT$tracking_arrow$push_branch"
         fi
     elif [[ $CHECKOUT_IS_TAG != 1 ]]; then
         CHECKOUT="$CHECKOUT!"
@@ -355,6 +363,13 @@ get_scm_prompt() (
 
     local src_ctrl=""
     local co_sym
+    local checkout="$CHECKOUT"
+    local checkout_prefix=""
+
+    if [[ $checkout == "[worktree]"* ]]; then
+        checkout_prefix="[worktree]"
+        checkout=${checkout#"[worktree]"}
+    fi
 
     if var_enabled "$FANCY_PROMPT_USE_SYMBOLS"; then
         if [[ $CHECKOUT_IS_TAG == 1 ]]; then
@@ -362,9 +377,16 @@ get_scm_prompt() (
         else
             co_sym=""
         fi
+
+        if [[ -n $checkout_prefix ]]; then
+            checkout_prefix="󰙅 "
+        else
+            checkout_prefix="$co_sym"
+        fi
     fi
 
-    src_ctrl+=$(build_section "$GRAY"   "$co_sym" "$CHECKOUT"      )
+    src_ctrl="$GRAY$checkout_prefix$CYAN$(escape_prompt "$CHECKOUT_NAME")"
+    src_ctrl+="$GRAY$(escape_prompt "${checkout#"$CHECKOUT_NAME"}")"
     src_ctrl+=$(build_section " $WHITE"   ↑       "$COMMITS_AHEAD" )
     src_ctrl+=$(build_section " $WHITE"   ↓       "$COMMITS_BEHIND")
     if [[ $CHECKOUT_UPSTREAM != "" ]]; then
