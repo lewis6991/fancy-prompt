@@ -150,6 +150,22 @@ class PromptTest(unittest.TestCase):
         self.assertIn("+1", output)
         self.assertIn("…1", output)
 
+    def test_intent_to_add_files_count_as_unstaged_changes(self):
+        (self.repo / "empty").touch()
+        (self.repo / "new").write_text("not staged\n")
+        self.git("add", "-N", "empty", "new")
+        (self.repo / "README.md").write_text("modified\n")
+        (self.repo / "staged").write_text("staged\n")
+        self.git("add", "staged")
+        (self.repo / "untracked").touch()
+
+        for shell, colour_end in (("bash", r"\]"), ("zsh", "%}")):
+            with self.subTest(shell=shell):
+                output = self.prompt(shell)
+                self.assertIn(f"\x1b[0;31m{colour_end}+3", output)
+                self.assertIn(f"\x1b[0;32m{colour_end}+1", output)
+                self.assertIn(f"\x1b[0;35m{colour_end}…1", output)
+
     def test_clean_submodule(self):
         self.git("-c", "protocol.file.allow=always", "submodule", "add", "--quiet",
                  str(PROJECT), "submodule")
